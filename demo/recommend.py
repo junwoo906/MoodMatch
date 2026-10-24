@@ -29,7 +29,7 @@ def recommend(model, places, request, top_n=3):
         ok, why = is_open(p, request["date"])
         if ok and request.get("regions") and p["region"] not in request["regions"]:
             ok, why = False, "지역 불일치"
-        if ok and p["price"] > request["budget"]:
+        if ok and p["price"] is not None and p["price"] > request["budget"]:  # 가격 미확인은 통과
             ok, why = False, "예산 초과"
         (candidates if ok else excluded).append(p if ok else (p["name"], why))
 
@@ -54,5 +54,6 @@ if __name__ == "__main__":
         top, excluded = recommend(model, places, req)
         print(f"\n=== {req['who']}: \"{req['mood']}\" (방문일 {req['date']}, 예산 {req['budget']:,}원) ===")
         for i, (p, s) in enumerate(top, 1):
-            print(f"{i}. {p['name']} ({p['region']}, {p['price']:,}원)  유사도 {s:.2f}")
+            price = "가격 미확인" if p["price"] is None else f"{p['price']:,}원"
+            print(f"{i}. {p['name']} ({p['region']}, {price})  유사도 {s:.2f}")
         print("제외:", "; ".join(f"{n}({why})" for n, why in excluded))
