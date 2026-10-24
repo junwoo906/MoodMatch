@@ -1,80 +1,58 @@
+"""MoodMatch 추천 데모: 사용자가 문장으로 말한 기분·취향과 장소 소개글의 의미 유사도로 추천한다.
+
+무료 로컬 임베딩 모델을 사용하므로 API 비용이 들지 않는다. (처음 실행 시 모델을 한 번 내려받음)
+"""
 import json
 import sys
 from pathlib import Path
 
-from tags import PRICE_LABEL, build_profile
+from sentence_transformers import SentenceTransformer, util
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-WEIGHTS = {"activity": 0.4, "mood": 0.3, "type": 0.15, "price": 0.15}
+MODEL = "jhgan/ko-sroberta-multitask"  # 한국어 문장 임베딩 모델 (무료)
 
 
-def passes_filter(place, profile):
-    """조건 필터: 하나라도 맞지 않으면 추천 후보에서 제외한다. (제외 사유를 함께 반환)"""
-    if place["status"] != "운영중":
-        return False, "운영 종료"
-    day = profile["visit_date"]
+def is_open(place, day):
+    """방문일에 운영 중인지 확인 (상설 장소는 기간이 없음)"""
     if place["start"] and day < place["start"]:
         return False, "방문일에 아직 시작 전"
     if place["end"] and day > place["end"]:
-        return False, "방문일에 이미 종료"
-    if profile["regions"] and place["region"] not in profile["regions"]:
-        return False, "지역 불일치"
-    if place["price"] > profile["max_price"]:
-        return False, "가격 초과"
+        return False, "운영 종료"
     return True, ""
 
 
-def match(prefs, place_tags):
-    """사용자가 중요하게 여기는 태그를 장소가 얼마나 갖추고 있는지 (0~1)"""
-    total = sum(prefs.values())
-    hit = sum(prefs[t] for t in place_tags if t in prefs)
-    return hit / total if total else 0.0
-
-
-def score(place, profile):
-    parts = {
-        "activity": match(profile["activity"], place["activities"]),
-        "mood": match(profile["mood"], place["moods"]),
-        "type": 1.0 if place["type"] in profile["types"] else 0.0,
-        "price": 1 - 0.25 * place["price"],
-    }
-    total = sum(WEIGHTS[k] * v for k, v in parts.items())
-    matched = [t for t in place["activities"] if profile["activity"][t] > 0] + \
-              [t for t in place["moods"] if profile["mood"][t] > 0]
-    return round(total, 3), matched
-
-
-def recommend(places, profile, top_n=3):
-    ranked, excluded = [], []
+def recommend(model, places, request, top_n=3):
+    """1) 조건 필터(날짜·지역·예산)는 코드로 거르고 2) 남은 곳을 의미 유사도 순으로 정렬한다."""
+    candidates, excluded = [], []
     for p in places:
-        ok, reason = passes_filter(p, profile)
-        if not ok:
-            excluded.append((p["name"], reason))
-            continue
-        s, matched = score(p, profile)
-        ranked.append({"name": p["name"], "score": s, "matched": matched,
-                       "region": p["region"], "price": PRICE_LABEL[p["price"]]})
-    ranked.sort(key=lambda r: r["score"], reverse=True)
+        ok, why = is_open(p, request["date"])
+        if ok and request.get("regions") and p["region"] not in request["regions"]:
+            ok, why = False, "지역 불일치"
+        if ok and p["price"] > request["budget"]:
+            ok, why = False, "예산 초과"
+        (candidates if ok else excluded).append(p if ok else (p["name"], why))
+
+    query = model.encode(request["mood"], convert_to_tensor=True)
+    docs = model.encode([p["desc"] for p in candidates], convert_to_tensor=True)
+    scores = util.cos_sim(query, docs)[0].tolist()
+    ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
     return ranked[:top_n], excluded
 
 
-USERS = {
-    "사용자 A (체험·사진·귀여운·무료 선호)": {
-        "activity_rank": ["체험", "사진", "굿즈"], "mood_rank": ["귀여운", "트렌디"],
-        "types": ["팝업"], "max_price": 1, "regions": None, "visit_date": "2026-10-31",
-    },
-    "사용자 B (관람·조용한·예술적 선호)": {
-        "activity_rank": ["관람", "사진"], "mood_rank": ["예술적", "조용한"],
-        "types": ["전시", "카페"], "max_price": 2, "regions": None, "visit_date": "2026-10-31",
-    },
-}
+REQUESTS = [
+    {"who": "사용자 A", "mood": "친구랑 귀여운 거 보면서 사진 많이 찍고 굿즈도 사고 싶어",
+     "date": "2026-10-31", "regions": None, "budget": 10000},
+    {"who": "사용자 B", "mood": "혼자 조용하게 작품 감상하면서 생각 정리하고 싶어",
+     "date": "2026-10-31", "regions": None, "budget": 30000},
+]
 
 if __name__ == "__main__":
     places = json.loads(Path(__file__).with_name("places.json").read_text(encoding="utf-8"))
-    for label, answers in USERS.items():
-        top, excluded = recommend(places, build_profile(answers))
-        print(f"\n=== {label} / 방문일 {answers['visit_date']} ===")
-        for i, r in enumerate(top, 1):
-            print(f"{i}. {r['name']} ({r['region']}, {r['price']})  점수 {r['score']}  일치 태그: {', '.join(r['matched']) or '-'}")
+    model = SentenceTransformer(MODEL)
+    for req in REQUESTS:
+        top, excluded = recommend(model, places, req)
+        print(f"\n=== {req['who']}: \"{req['mood']}\" (방문일 {req['date']}, 예산 {req['budget']:,}원) ===")
+        for i, (p, s) in enumerate(top, 1):
+            print(f"{i}. {p['name']} ({p['region']}, {p['price']:,}원)  유사도 {s:.2f}")
         print("제외:", "; ".join(f"{n}({why})" for n, why in excluded))
