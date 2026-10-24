@@ -1,0 +1,18 @@
+[
+  {"id": 1, "name": "캐릭터 팝업 A", "type": "팝업", "region": "성수", "start": "2026-10-20", "end": "2026-11-15", "price": 0, "status": "운영중",
+   "activities": ["체험", "사진", "굿즈"], "moods": ["귀여운", "트렌디"]},
+  {"id": 2, "name": "미디어아트 전시 B", "type": "전시", "region": "종로", "start": "2026-09-01", "end": "2026-12-31", "price": 2, "status": "운영중",
+   "activities": ["관람", "사진"], "moods": ["예술적", "조용한"]},
+  {"id": 3, "name": "레트로 게임 팝업 C", "type": "팝업", "region": "홍대", "start": "2026-10-10", "end": "2026-11-10", "price": 0, "status": "운영중",
+   "activities": ["체험", "굿즈"], "moods": ["레트로", "트렌디"]},
+  {"id": 4, "name": "북카페 D", "type": "카페", "region": "종로", "start": null, "end": null, "price": 1, "status": "운영중",
+   "activities": ["음식"], "moods": ["조용한"]},
+  {"id": 5, "name": "디저트 팝업 E", "type": "팝업", "region": "성수", "start": "2026-10-25", "end": "2026-11-08", "price": 1, "status": "운영중",
+   "activities": ["음식", "사진", "굿즈"], "moods": ["귀여운"]},
+  {"id": 6, "name": "사진전 F", "type": "전시", "region": "용산", "start": "2026-10-01", "end": "2026-11-30", "price": 1, "status": "운영중",
+   "activities": ["관람"], "moods": ["예술적", "조용한"]},
+  {"id": 7, "name": "종료된 팝업 G", "type": "팝업", "region": "성수", "start": "2026-10-01", "end": "2026-10-20", "price": 0, "status": "종료",
+   "activities": ["체험", "사진"], "moods": ["귀여운"]},
+  {"id": 8, "name": "향수 브랜드 팝업 H", "type": "팝업", "region": "성수", "start": "2026-11-05", "end": "2026-11-20", "price": 0, "status": "운영중",
+   "activities": ["체험", "굿즈"], "moods": ["트렌디"]}
+]
