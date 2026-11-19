@@ -5,6 +5,7 @@
 """
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer, util
@@ -34,6 +35,16 @@ OPTION_TEXT = {
     "가족": "가족과 함께 가기 좋은 곳",
 }
 RANK_WEIGHT = [1.0, 0.7, 0.4]  # 1순위, 2순위, 3순위
+PLACES_FILE = Path(__file__).with_name("places.json")
+
+
+def load_model():
+    """임베딩 모델을 불러온다. 느리므로 프로그램에서 한 번만 불러서 재사용한다."""
+    return SentenceTransformer(MODEL)
+
+
+def load_places(path=PLACES_FILE):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def is_open(place, day):
@@ -55,10 +66,12 @@ def answer_weights(ans):
 
 
 def recommend(model, places, ans, top_n=3):
-    """1) 조건 필터(종류·날짜·지역·예산)는 코드로 거르고 2) 고른 보기와 소개글의 유사도를 가중 평균해 정렬한다."""
+    """1) 조건 필터(종류·날짜·지역·예산)는 코드로 거르고 2) 고른 보기와 소개글의 유사도를 가중 평균해 정렬한다.
+    방문일(date)을 안 주면 오늘 날짜로 본다."""
+    day = ans.get("date") or date.today().isoformat()
     candidates, excluded = [], []
     for p in places:
-        ok, why = is_open(p, ans["date"])
+        ok, why = is_open(p, day)
         if ok and p["type"] not in ans["types"]:
             ok, why = False, "종류 불일치"
         if ok and ans.get("regions") and p["region"] not in ans["regions"]:
@@ -66,6 +79,8 @@ def recommend(model, places, ans, top_n=3):
         if ok and p["price"] is not None and p["price"] > ans["budget"]:  # 가격 미확인은 통과
             ok, why = False, "예산 초과"
         (candidates if ok else excluded).append(p if ok else (p["name"], why))
+    if not candidates:  # 조건에 맞는 곳이 없으면 유사도 계산을 건너뛴다
+        return [], excluded
 
     picks = answer_weights(ans)
     opts = model.encode([OPTION_TEXT[o] for o, _ in picks], convert_to_tensor=True)
@@ -93,8 +108,8 @@ ANSWERS = [
 ]
 
 if __name__ == "__main__":
-    places = json.loads(Path(__file__).with_name("places.json").read_text(encoding="utf-8"))
-    model = SentenceTransformer(MODEL)
+    places = load_places()
+    model = load_model()
     for ans in ANSWERS:
         top, excluded = recommend(model, places, ans)
         print(f"\n=== {ans['who']}: 종류 {ans['types']} / 하고 싶은 것 {ans['activity_rank']} / "
