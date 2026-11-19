@@ -36,7 +36,8 @@ OPTION_TEXT = {
 }
 RANK_WEIGHT = [1.0, 0.7, 0.4]  # 1순위, 2순위, 3순위
 LIKE_WEIGHT = 0.7  # 좋아요한 장소와 비슷한 정도를 보기 하나만큼 반영
-PLACES_FILE = Path(__file__).with_name("places.json")
+PLACES_FILE = Path(__file__).with_name("places.json")  # fetch_places.py로 받은 실제 데이터
+SAMPLE_FILE = Path(__file__).with_name("places_sample.json")  # 중간발표 때 쓴 테스트 데이터
 
 
 def load_model():
@@ -45,7 +46,9 @@ def load_model():
 
 
 def load_places(path=PLACES_FILE):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    """장소 데이터를 읽는다. 실제 데이터를 아직 안 받았으면 테스트 데이터를 쓴다."""
+    path = Path(path) if Path(path).exists() else SAMPLE_FILE
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def embed_places(model, places):
@@ -123,7 +126,7 @@ ANSWERS = [
 ]
 
 if __name__ == "__main__":
-    places = load_places()
+    places = load_places(SAMPLE_FILE)  # 예시 답변의 방문일(10/31)에 맞춘 테스트 데이터
     model = load_model()
     for ans in ANSWERS:
         top, excluded = recommend(model, places, ans)
