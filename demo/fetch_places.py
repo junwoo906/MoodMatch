@@ -3,11 +3,13 @@
 - 전시: 서울 열린데이터광장 「서울시 문화행사 정보」 (분류 '전시/미술')
   API에 소개글이 비어 있으면 서울문화포털 상세 페이지(robots.txt 허용 경로)에서 소개글을 가져온다.
 - 팝업: 같은 API에서 제목에 '팝업'이 들어간 행사
+        + 네이버 검색 API(뉴스)에서 팝업 오픈 기사를 찾아 이름·기간·지역을 뽑는다 (기간을 못 뽑은 기사는 버림)
 - 카페: 한국관광공사 TourAPI (KorService2)
 
 API 키는 프로젝트 폴더의 .env 파일에 넣는다 (git에 올라가지 않음).
     SEOUL_API_KEY=...   (없으면 테스트용 'sample' 키로 5건만 받음)
     TOUR_API_KEY=...    (없으면 카페는 건너뜀)
+    NAVER_CLIENT_ID=... / NAVER_CLIENT_SECRET=...   (없으면 뉴스 팝업은 건너뜀)
 
 실행: python demo/fetch_places.py
 """
@@ -39,6 +41,18 @@ TOUR_COMMON = {"MobileOS": "ETC", "MobileApp": "MoodMatch", "_type": "json"}
 SEOUL_REGION = "11"            # 법정동 시도 코드: 서울
 CAFE_CATEGORY = ("FD", "FD05")  # 분류체계 대/중분류: 음식 > 카페·찻집 (키 발급 후 lclsSystmCode2로 확인 필요)
 CAFE_LIMIT = 40                # 카페는 소개글을 한 곳씩 따로 받아야 해서 개수를 제한 (하루 호출 한도 고려)
+
+NAVER_URL = "https://openapi.naver.com/v1/search/news.json"
+NAVER_QUERIES = ["팝업스토어 오픈", "성수 팝업스토어", "더현대 서울 팝업", "홍대 팝업스토어", "잠실 팝업스토어"]
+# 기사에 나온 장소 이름 → 구 (서울이 아닌 곳은 버린다)
+PLACE_GU = {
+    "성수": "성동구", "서울숲": "성동구", "더현대": "영등포구", "여의도": "영등포구", "IFC몰": "영등포구",
+    "홍대": "마포구", "연남": "마포구", "합정": "마포구", "망원": "마포구", "잠실": "송파구", "롯데월드몰": "송파구",
+    "코엑스": "강남구", "압구정": "강남구", "가로수길": "강남구", "신사": "강남구", "강남": "강남구", "청담": "강남구",
+    "명동": "중구", "을지로": "중구", "DDP": "중구", "동대문": "중구", "신세계백화점 본점": "중구", "롯데백화점 본점": "중구",
+    "용산": "용산구", "한남": "용산구", "이태원": "용산구", "삼청": "종로구", "인사동": "종로구", "익선": "종로구",
+    "신촌": "서대문구", "타임스퀘어": "영등포구", "영등포": "영등포구",
+}
 
 
 def won(text):
@@ -120,6 +134,83 @@ def tour(op, key, **params):
     return items if isinstance(items, list) else [items]
 
 
+def clean(text):
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", "", text)).split())
+
+
+def news_period(text, pub):
+    """기사 글에서 운영 기간을 뽑는다. '11월 20일부터 12월 7일까지', '21일부터 다음달 3일까지',
+    '11월 26일~2027년 1월 4일', '12월 7일까지' 등. 시작일이 없으면 기사 날짜(pub)부터로 본다.
+    연도가 없으면 기사 연도로 정하고, 기사보다 두 달 이상 이른 달이면 다음 해로 본다. 못 찾으면 None."""
+    day = r"(?:(\d{4})년\s*)?(?:(\d{1,2})월|(다음\s?달|내달))?\s*(\d{1,2})일"
+    m = re.search(day + r"\s*(?:부터|~|-|–)\s*" + day + r"(?:\s*까지)?", text)
+    if m:
+        start_g, end_g = m.groups()[:4], m.groups()[4:]
+    else:
+        m = re.search(day + r"\s*까지", text)
+        if not m or not (m.group(2) or m.group(3)):  # '7일까지'처럼 달이 없으면 믿기 어려워 버림
+            return None
+        start_g, end_g = None, m.groups()
+
+    def to_date(g, base_month):
+        y, mon, next_month, d = g
+        mon = int(mon) if mon else (pub.month % 12 + 1 if next_month else base_month)
+        y = int(y) if y else pub.year + (1 if mon < pub.month - 1 else 0)
+        return date(y, mon, int(d))
+
+    try:
+        start = to_date(start_g, pub.month) if start_g else pub
+        end = to_date(end_g, start.month)
+    except ValueError:
+        return None
+    if end < start and not end_g[0]:  # '12월 20일~1월 15일': 해를 넘김
+        end = end.replace(year=end.year + 1)
+    return (start.isoformat(), end.isoformat()) if start <= end else None
+
+
+def news_name(title):
+    """기사 제목에서 팝업 이름: 따옴표 안 이름이 있으면 그것, 없으면 제목 그대로."""
+    m = re.search(r"['‘\"“]([^'’\"”]{2,30})['’\"”]", title)
+    name = m.group(1) if m else title
+    return name if "팝업" in name else f"{name} 팝업"
+
+
+def news_gu(text):
+    for place, g in PLACE_GU.items():
+        if place in text:
+            return g
+    return None
+
+
+def fetch_news_popups(cid, secret):
+    headers = {"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": secret}
+    popups = []
+    for q in NAVER_QUERIES:
+        r = requests.get(NAVER_URL, headers=headers, params={"query": q, "display": 100, "sort": "date"}, timeout=20)
+        for it in r.json().get("items", []):
+            title, body = clean(it["title"]), clean(it["description"])
+            if "팝업" not in title:
+                continue
+            pub = date(*time.strptime(it["pubDate"][5:16], "%d %b %Y")[:3])
+            period, region = news_period(body + " " + title, pub), news_gu(title + " " + body)
+            if not period or not region:  # 기간이나 서울 장소를 모르면 추천할 수 없어서 버린다
+                continue
+            name = news_name(title)
+            popups.append({
+                "id": f"news-{name}",
+                "name": name,
+                "type": "팝업",
+                "region": region,
+                "start": period[0],
+                "end": period[1],
+                "price": None,
+                "desc": f"{title}. {body}",
+                "place": "",
+                "source": it["originallink"] or it["link"],
+            })
+    return popups
+
+
 def fetch_cafes(key):
     big, mid = CAFE_CATEGORY
     items = tour("areaBasedList2", key, lDongRegnCd=SEOUL_REGION, lclsSystm1=big, lclsSystm2=mid,
@@ -148,10 +239,15 @@ def fetch_cafes(key):
 def main():
     seoul_key = os.getenv("SEOUL_API_KEY") or "sample"
     tour_key = os.getenv("TOUR_API_KEY")
+    naver = (os.getenv("NAVER_CLIENT_ID"), os.getenv("NAVER_CLIENT_SECRET"))
     if seoul_key == "sample":
         print("SEOUL_API_KEY가 없어 테스트용 sample 키로 받습니다 (분류별 5건만).")
 
     exhibitions, popups = fetch_seoul(seoul_key)
+    if all(naver):
+        popups += fetch_news_popups(*naver)
+    else:
+        print("NAVER_CLIENT_ID/SECRET이 없어 뉴스 팝업은 건너뜁니다.")
     cafes = fetch_cafes(tour_key) if tour_key else []
     if not tour_key:
         print("TOUR_API_KEY가 없어 카페는 건너뜁니다.")
