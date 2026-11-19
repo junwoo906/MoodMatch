@@ -3,13 +3,12 @@
 
 실행: streamlit run demo/app.py
 """
+import json
 from datetime import date
 from html import escape
 from itertools import permutations
 from math import asin, cos, radians, sin, sqrt
 
-import pandas as pd
-import pydeck as pdk
 import streamlit as st
 
 import recommend as rec
@@ -20,10 +19,11 @@ MOODS = ["귀여운", "조용한", "트렌디", "예술적", "레트로"]
 COMPANIONS = ["혼자", "친구", "연인", "가족"]
 BUDGETS = {"무료만": 0, "5천 원": 5000, "1만 원": 10000, "2만 원": 20000, "3만 원": 30000, "상관없음": 10**9}
 TYPE_ICON = {"팝업": "🛍️", "전시": "🖼️", "카페": "☕"}
-TYPE_COLOR = {"팝업": [255, 107, 91], "전시": [124, 92, 255], "카페": [214, 140, 60]}  # 지도 핀 색
+TYPE_COLOR = {"팝업": "#FF6B5B", "전시": "#7C5CFF", "카페": "#D68C3C"}  # 지도 핀 색
 DESC_LEN = 110  # 카드에 보일 소개글 길이
 TOP_N = 6       # 추천 개수 (2열로 3줄)
 SOON_DAYS = 7   # 끝나기 7일 전부터 '곧 끝나요', 연 지 7일 안이면 'NEW'
+BROWSE_PAGE = 12  # 전체 둘러보기에서 한 번에 보여 줄 개수
 
 # 취향 유형 = 1순위 분위기(형용사) + 1순위 하고 싶은 것(명사)
 TASTE_MOOD = {
@@ -57,6 +57,9 @@ div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {
 .thumb { width: 100%; height: 190px; object-fit: cover; border-radius: 14px; display: block; }
 .noimg { height: 190px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
          font-size: 64px; background: linear-gradient(135deg, #FFE1D6, #FFF1D9); }
+.thumb.mini, .noimg.mini { height: 130px; font-size: 44px; }
+.mtitle { font-weight: 700; font-size: .95rem; line-height: 1.35; margin: 8px 0 6px; height: 2.7em; overflow: hidden;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .title { font-size: 1.15rem; font-weight: 800; line-height: 1.35; margin: 8px 0 6px; }
 .rank { display: inline-block; background: #FF6B5B; color: #fff; border-radius: 999px;
         width: 26px; height: 26px; line-height: 26px; text-align: center; font-size: .85rem; margin-right: 6px; }
@@ -147,30 +150,45 @@ def plan_course(ps):
     return course
 
 
-def show_map(ps, path=False):
-    """장소들을 번호 핀으로 지도에 표시. path=True면 순서대로 선을 잇는다."""
+MAP_HTML = """
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  html, body {{ margin: 0; }}
+  #map {{ height: {height}px; border-radius: 16px; }}
+  .leaflet-tile-pane {{ filter: saturate(.55) brightness(1.04); }}
+  .pin {{ width: 28px; height: 28px; border-radius: 50%; color: #fff; font: 700 13px sans-serif;
+          display: flex; align-items: center; justify-content: center; border: 2px solid #fff;
+          box-shadow: 0 2px 6px rgba(0,0,0,.35); }}
+</style>
+<div id="map"></div>
+<script>
+  const pts = {points};
+  const map = L.map("map", {{ scrollWheelZoom: false }});
+  L.tileLayer("https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }}).addTo(map);
+  pts.forEach(p => L.marker([p.lat, p.lon], {{ icon: L.divIcon({{ className: "",
+      html: `<div class="pin" style="background:${{p.color}}">${{p.label}}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }}) }})
+    .addTo(map).bindPopup(`<b>${{p.label}}. ${{p.name}}</b><br>${{p.info}}`));
+  if ({path} && pts.length > 1) L.polyline(pts.map(p => [p.lat, p.lon]), {{ color: "#FF6B5B", weight: 4, opacity: .7 }}).addTo(map);
+  if (pts.length > 1) map.fitBounds(pts.map(p => [p.lat, p.lon]), {{ padding: [40, 40] }});
+  else map.setView([pts[0].lat, pts[0].lon], 15);
+</script>
+"""
+
+
+def show_map(ps, path=False, height=420):
+    """장소들을 번호 핀으로 지도(Leaflet + 무료 OpenStreetMap 지도, 키 필요 없음)에 표시. path=True면 순서대로 선을 잇는다."""
     ps = [p for p in ps if p.get("lat")]
     if not ps:
         st.info("지도에 표시할 좌표가 없어요.")
         return
-    df = pd.DataFrame([{"lat": p["lat"], "lon": p["lon"], "name": p["name"], "label": str(i),
-                        "info": f"{p['type']} · {p['region']}", "color": TYPE_COLOR.get(p["type"], [120, 120, 120])}
-                       for i, p in enumerate(ps, 1)])
-    layers = [
-        pdk.Layer("ScatterplotLayer", df, get_position="[lon, lat]", get_fill_color="color",
-                  get_radius=14, radius_units="pixels", pickable=True, stroked=True,
-                  get_line_color=[255, 255, 255], line_width_min_pixels=2),
-        pdk.Layer("TextLayer", df, get_position="[lon, lat]", get_text="label", get_size=14,
-                  get_color=[255, 255, 255], get_text_anchor="'middle'", get_alignment_baseline="'center'"),
-    ]
-    if path and len(ps) > 1:
-        layers.insert(0, pdk.Layer("PathLayer", [{"path": [[p["lon"], p["lat"]] for p in ps]}], get_path="path",
-                                   get_color=[255, 107, 91, 160], width_min_pixels=4))
-    view = pdk.ViewState(latitude=df["lat"].mean(), longitude=df["lon"].mean(),
-                         zoom=11 if len(ps) > 1 else 13)
-    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view,  # 배경 지도는 Streamlit 기본(무료 Carto)
-                             tooltip={"text": "{label}. {name}\n{info}"}), height=420)
-    st.caption("  ".join(f"{TYPE_ICON[t]} {t}" for t in TYPES) + " — 핀 색: 팝업 빨강 · 전시 보라 · 카페 주황. "
+    points = [{"lat": p["lat"], "lon": p["lon"], "label": i, "name": escape(p["name"]),
+               "info": f"{TYPE_ICON.get(p['type'], '')} {p['type']} · {p['region']}", "color": TYPE_COLOR.get(p["type"], "#888")}
+              for i, p in enumerate(ps, 1)]
+    data = json.dumps(points, ensure_ascii=False).replace("</", "<\\/")  # 글 속 </script>가 코드를 끊지 않게
+    st.iframe(MAP_HTML.format(points=data, path="true" if path else "false", height=height), height=height + 10)
+    st.caption("핀 색: 🛍️ 팝업 빨강 · 🖼️ 전시 보라 · ☕ 카페 주황 · 핀을 누르면 이름이 나와요. "
                "뉴스로 찾은 팝업은 동네 대표 위치예요.")
 
 
@@ -240,6 +258,65 @@ def show_course(places, day):
         st.rerun()
 
 
+def show_mini(p, day):
+    """전체 둘러보기용 작은 카드"""
+    with st.container(border=True):
+        if p.get("image"):
+            st.markdown(f'<img class="thumb mini" src="{escape(p["image"])}" alt="">', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="noimg mini">{TYPE_ICON.get(p["type"], "🎈")}</div>', unsafe_allow_html=True)
+        price = "가격 미확인" if p["price"] is None else ("무료" if p["price"] == 0 else f"{p['price']:,}원")
+        b = badge(p, day)
+        link = f'<a href="{escape(p["source"])}" target="_blank">공식 안내 →</a>' if p.get("source") else ""
+        st.markdown(
+            f'<div class="mtitle">{escape(p["name"])}</div>'
+            + (f'<span class="chip {b[1]}">{b[0]}</span>' if b else "")
+            + f'<span class="chip">{TYPE_ICON.get(p["type"], "")} {p["type"]}</span>'
+            + f'<span class="chip">📍 {p["region"]}</span><span class="chip">💳 {price}</span>'
+            + f'<div class="desc">📅 {period_text(p)} · {link}</div>',
+            unsafe_allow_html=True)
+        liked = p["id"] in st.session_state.feedback["liked"]
+        if st.button("❤️ 찜 취소" if liked else "🤍 찜하기", key=f"like{p['id']}", use_container_width=True):
+            (st.session_state.feedback["liked"].discard if liked else st.session_state.feedback["liked"].add)(p["id"])
+            st.rerun()
+
+
+def show_browse(places, day, ans):
+    """고른 지역의 팝업·전시·카페 전체 목록 (방문일에 열려 있는 곳만)"""
+    c1, c2, c3 = st.columns([1.3, 1.6, 1])
+    kinds = c1.pills("종류", TYPES, selection_mode="multi", default=TYPES, key="browse_types",
+                     format_func=lambda t: f"{TYPE_ICON[t]} {t}")
+    picked = (ans or {}).get("regions") or []  # 질문지에서 고른 지역을 기본으로 (질문지가 바뀌면 새로 맞춤)
+    regions = c2.multiselect("지역 (비워 두면 서울 전체)", sorted({p["region"] for p in places}),
+                             default=picked, key=f"browse_regions_{'_'.join(picked)}")
+    order = c3.selectbox("정렬", ["마감 임박순", "새로 오픈순", "이름순"], key="browse_order")
+
+    items = [p for p in places if p["type"] in (kinds or TYPES) and (not regions or p["region"] in regions)
+             and rec.is_open(p, day.isoformat())[0]]
+    if order == "마감 임박순":
+        items.sort(key=lambda p: p["end"] or "9999")  # 상설(카페)은 뒤로
+    elif order == "새로 오픈순":
+        items.sort(key=lambda p: p["start"] or "0000", reverse=True)
+    else:
+        items.sort(key=lambda p: p["name"])
+
+    count = {t: sum(p["type"] == t for p in items) for t in TYPES}
+    st.markdown(f'<div class="section">📋 {", ".join(regions) if regions else "서울 전체"} · {day:%m월 %d일}에 갈 수 있는 곳 '
+                f'{len(items)}곳 <small>(' + " · ".join(f"{TYPE_ICON[t]} {count[t]}" for t in TYPES) + ')</small></div>',
+                unsafe_allow_html=True)
+    if not items:
+        st.info("조건에 맞는 곳이 없어요. 종류나 지역을 바꿔 보세요.")
+        return
+    shown = st.session_state.setdefault("browse_n", BROWSE_PAGE)
+    cols = st.columns(3, gap="small")
+    for i, p in enumerate(items[:shown]):
+        with cols[i % 3]:
+            show_mini(p, day)
+    if shown < len(items) and st.button(f"더 보기 ({shown}/{len(items)})", use_container_width=True):
+        st.session_state.browse_n += BROWSE_PAGE
+        st.rerun()
+
+
 st.set_page_config(page_title="MoodMatch", page_icon="🎈", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
 st.markdown('<div class="hero"><h1>🎈 MoodMatch</h1>'
@@ -280,29 +357,33 @@ if submitted:
 
 with right:
     ans = st.session_state.answers
-    if not ans:
-        st.markdown(f'<div class="empty"><div>🔍</div>왼쪽 질문지에 답하고 <b>추천받기</b>를 눌러 보세요.<br>'
-                    f'지금 열려 있는 {len(places)}곳 중에서 골라 드려요.</div>', unsafe_allow_html=True)
-    else:
-        fb = st.session_state.feedback
-        visit = date.fromisoformat(ans["date"])
+    fb = st.session_state.feedback
+    visit = date.fromisoformat(ans["date"]) if ans else date.today()
+    top = []
+    if ans:
         top, _ = rec.recommend(model, places, ans, top_n=TOP_N, place_vecs=place_vecs,
                                liked=st.session_state.get("liked_at_submit", set()), disliked=fb["disliked"])
         taste_card(ans)
-        # 탭은 숨은 탭의 지도가 빈 화면으로 그려질 때가 있어서, 고른 화면 하나만 그리는 선택 버튼을 쓴다
-        views = ["🎯 추천 결과", "🗺️ 지도로 보기", f"❤️ 찜·코스 ({len(fb['liked'])})"]
-        view = st.radio("보기", range(3), format_func=lambda i: views[i], horizontal=True,
-                        label_visibility="collapsed", key="view")
-        if view == 0:
-            st.caption("🤍 찜한 곳은 ‘찜·코스’에 모이고, 다음에 추천받기를 누르면 비슷한 곳을 더 찾아 줘요. "
-                       "👎 별로예요는 바로 빼고 다른 곳으로 채워요.")
-            if not top:
-                st.info("조건에 맞는 곳이 없어요. 날짜, 지역, 예산을 바꿔 보세요.")
-            cols = st.columns(2, gap="medium")
-            for i, (p, score, best) in enumerate(top, 1):
-                with cols[(i - 1) % 2]:
-                    show_card(i, p, score, best, visit)
-        elif view == 1:
-            show_map([p for p, _, _ in top])
-        else:
-            show_course(places, visit)
+    # 탭은 숨은 탭의 지도가 빈 화면으로 그려질 때가 있어서, 고른 화면 하나만 그리는 선택 버튼을 쓴다
+    views = ["🎯 추천 결과", "🗺️ 지도로 보기", "📋 전체 둘러보기", f"❤️ 찜·코스 ({len(fb['liked'])})"]
+    view = st.radio("보기", range(4), format_func=lambda i: views[i], horizontal=True,
+                    label_visibility="collapsed", key="view")
+    if view in (0, 1) and not ans:
+        st.markdown(f'<div class="empty"><div>🔍</div>왼쪽 질문지에 답하고 <b>추천받기</b>를 눌러 보세요.<br>'
+                    f'지금 열려 있는 {len(places)}곳 중에서 골라 드려요. '
+                    f'먼저 구경하고 싶으면 <b>📋 전체 둘러보기</b>를 눌러 보세요.</div>', unsafe_allow_html=True)
+    elif view == 0:
+        st.caption("🤍 찜한 곳은 ‘찜·코스’에 모이고, 다음에 추천받기를 누르면 비슷한 곳을 더 찾아 줘요. "
+                   "👎 별로예요는 바로 빼고 다른 곳으로 채워요.")
+        if not top:
+            st.info("조건에 맞는 곳이 없어요. 날짜, 지역, 예산을 바꿔 보세요.")
+        cols = st.columns(2, gap="medium")
+        for i, (p, score, best) in enumerate(top, 1):
+            with cols[(i - 1) % 2]:
+                show_card(i, p, score, best, visit)
+    elif view == 1:
+        show_map([p for p, _, _ in top])
+    elif view == 2:
+        show_browse(places, visit, ans)
+    else:
+        show_course(places, visit)
