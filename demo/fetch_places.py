@@ -181,6 +181,8 @@ def news_period(text, pub):
     """기사 글에서 운영 기간을 뽑는다. '11월 20일부터 12월 7일까지', '21일부터 다음달 3일까지',
     '11월 26일~2027년 1월 4일', '12월 7일까지' 등. 시작일이 없으면 기사 날짜(pub)부터로 본다.
     연도가 없으면 기사 연도로 정하고, 기사보다 두 달 이상 이른 달이면 다음 해로 본다. 못 찾으면 None."""
+    if re.search(r"지난\s?달|지난\s*\d{1,2}월", text):  # 이미 지난 행사 이야기
+        return None
     day = r"(?:(\d{4})년\s*)?(?:(\d{1,2})월|(다음\s?달|내달))?\s*(\d{1,2})일"
     m = re.search(day + r"\s*(?:부터|~|-|–)\s*" + day + r"(?:\s*까지)?", text)
     if m:
@@ -204,7 +206,25 @@ def news_period(text, pub):
         return None
     if end < start and not end_g[0]:  # '12월 20일~1월 15일': 해를 넘김
         end = end.replace(year=end.year + 1)
-    return (start.isoformat(), end.isoformat()) if start <= end else None
+    if not start <= end or (start - pub).days > 90:  # 석 달 넘게 뒤에 시작한다는 건 연도를 잘못 읽었을 가능성
+        return None
+    return start.isoformat(), end.isoformat()
+
+
+STOP_WORDS = {"팝업", "팝업스토어", "스토어", "서울", "오픈", "운영", "진행", "선보여", "선보인다", "개최", "오는",
+              "까지", "부터", "에서", "있다", "한다", "이번", "브랜드", "매장", "공식", "기념"}
+
+
+def words(text):
+    return {w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", text)} - STOP_WORDS
+
+
+def same_popup(a, b):
+    """같은 지역에 기간이 겹치고, 기사 낱말이 충분히 겹치면 같은 팝업을 다룬 다른 기사로 본다."""
+    if a["region"] != b["region"] or a["end"] < b["start"] or b["end"] < a["start"]:
+        return False
+    wa, wb = words(a["desc"]), words(b["desc"])
+    return len(wa & wb) / max(1, min(len(wa), len(wb))) >= 0.3
 
 
 def news_name(title):
@@ -245,14 +265,14 @@ def fetch_news_popups(cid, secret):
         r = requests.get(NAVER_URL, headers=headers, params={"query": q, "display": 100, "sort": "date"}, timeout=20)
         for it in r.json().get("items", []):
             title, body = clean(it["title"]), clean(it["description"])
-            if "팝업" not in title:
+            if "팝업" not in title or re.search(r"성료|마무리|종료|막\s?내려", title):
                 continue
             pub = date(*time.strptime(it["pubDate"][5:16], "%d %b %Y")[:3])
             period, region = news_period(body + " " + title, pub), news_gu(title + " " + body)
             if not period or not region:  # 기간이나 서울 장소를 모르면 추천할 수 없어서 버린다
                 continue
             name = news_name(title)
-            popups.append({
+            item = {
                 "id": f"news-{name}",
                 "name": name,
                 "type": "팝업",
@@ -263,7 +283,9 @@ def fetch_news_popups(cid, secret):
                 "desc": f"{title}. {body}",
                 "place": "",
                 "source": it["originallink"] or it["link"],
-            })
+            }
+            if not any(same_popup(item, p) for p in popups):  # 같은 팝업을 다룬 다른 기사는 버림
+                popups.append(item)
     return popups
 
 
