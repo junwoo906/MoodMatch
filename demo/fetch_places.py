@@ -1,6 +1,7 @@
 """공식 공개 데이터에서 장소를 받아 places.json을 새로 만든다. 필요할 때 직접 실행한다.
 
 - 전시: 서울 열린데이터광장 「서울시 문화행사 정보」 (분류 '전시/미술')
+  API에 소개글이 비어 있으면 서울문화포털 상세 페이지(robots.txt 허용 경로)에서 소개글을 가져온다.
 - 팝업: 같은 API에서 제목에 '팝업'이 들어간 행사
 - 카페: 한국관광공사 TourAPI (KorService2)
 
@@ -10,10 +11,12 @@ API 키는 프로젝트 폴더의 .env 파일에 넣는다 (git에 올라가지 
 
 실행: python demo/fetch_places.py
 """
+import html
 import json
 import os
 import re
 import sys
+import time
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
@@ -29,6 +32,7 @@ TODAY = date.today().isoformat()
 
 SEOUL_URL = "http://openapi.seoul.go.kr:8088/{key}/json/culturalEventInfo/{start}/{end}/{code}/{title}"
 SEOUL_PAGE = 1000  # 한 번에 받을 수 있는 최대 건수 (sample 키는 5건)
+PORTAL_URL = "https://culture.seoul.go.kr/culture/culture/cultureEvent/view.do?cultcode={}&menuNo=200008"
 
 TOUR_URL = "https://apis.data.go.kr/B551011/KorService2"
 TOUR_COMMON = {"MobileOS": "ETC", "MobileApp": "MoodMatch", "_type": "json"}
@@ -66,12 +70,28 @@ def seoul_events(key, code=" ", title=" "):
     return rows
 
 
+def portal_desc(cultcode):
+    """서울문화포털 행사 상세 페이지에서 '상세보기' 아래 소개글을 가져온다."""
+    time.sleep(0.5)  # 서버에 부담을 주지 않게 천천히
+    try:
+        page = requests.get(PORTAL_URL.format(cultcode), timeout=20).text
+    except requests.RequestException:
+        return ""
+    text = re.sub(r"<script.*?</script>|<style.*?</style>|<[^>]+>", " ", page, flags=re.S)
+    text = " ".join(html.unescape(text).split())
+    _, found, after = text.partition("상세보기")
+    return after[:300] if found else ""
+
+
 def from_seoul(row, kind):
     start, end = row["STRTDATE"][:10], row["END_DATE"][:10]
-    desc = " ".join(t for t in (row["PROGRAM"], row["ETC_DESC"]) if t.strip())
-    if len(desc) < 20:  # 소개글이 비어 있는 경우가 많아 제목·장소로 보충
-        desc = f"{row['TITLE']}. {row['PLACE']}에서 열리는 {row['CODENAME']} 행사. {desc}".strip()
     cult = re.search(r"cultcode=(\d+)", row["HMPG_ADDR"])
+    desc = " ".join(t for t in (row["PROGRAM"], row["ETC_DESC"]) if t.strip())
+    if len(desc) < 50 and cult and end >= TODAY:  # API 소개글이 비어 있는 경우가 많아 포털에서 보충
+        desc = portal_desc(cult.group(1)) or desc
+    if len(desc) < 20:  # 그래도 없으면 제목·장소로 대신
+        desc = f"{row['TITLE']}. {row['PLACE']}에서 열리는 {row['CODENAME']} 행사. {desc}".strip()
+    desc = f"{row['TITLE']}. {desc}" if row["TITLE"] not in desc else desc
     return {
         "id": f"seoul-{cult.group(1) if cult else row['TITLE']}",
         "name": row["TITLE"],
