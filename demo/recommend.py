@@ -35,6 +35,7 @@ OPTION_TEXT = {
     "가족": "가족과 함께 가기 좋은 곳",
 }
 RANK_WEIGHT = [1.0, 0.7, 0.4]  # 1순위, 2순위, 3순위
+LIKE_WEIGHT = 0.7  # 좋아요한 장소와 비슷한 정도를 보기 하나만큼 반영
 PLACES_FILE = Path(__file__).with_name("places.json")
 
 
@@ -45,6 +46,11 @@ def load_model():
 
 def load_places(path=PLACES_FILE):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def embed_places(model, places):
+    """장소 소개글을 미리 임베딩해 둔다. 장소가 많아도 추천할 때마다 다시 계산하지 않게."""
+    return model.encode([p["desc"] for p in places], convert_to_tensor=True)
 
 
 def is_open(place, day):
@@ -65,13 +71,18 @@ def answer_weights(ans):
     return picks
 
 
-def recommend(model, places, ans, top_n=3):
+def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=()):
     """1) 조건 필터(종류·날짜·지역·예산)는 코드로 거르고 2) 고른 보기와 소개글의 유사도를 가중 평균해 정렬한다.
-    방문일(date)을 안 주면 오늘 날짜로 본다."""
+    방문일(date)을 안 주면 오늘 날짜로 본다. place_vecs는 embed_places() 결과(없으면 여기서 계산).
+    피드백: disliked(장소 id)는 빼고, liked(장소 id)와 소개글이 비슷한 곳은 점수를 더 준다."""
     day = ans.get("date") or date.today().isoformat()
+    if place_vecs is None:
+        place_vecs = embed_places(model, places)
     candidates, excluded = [], []
     for p in places:
         ok, why = is_open(p, day)
+        if ok and p["id"] in disliked:
+            ok, why = False, "별로예요 표시"
         if ok and p["type"] not in ans["types"]:
             ok, why = False, "종류 불일치"
         if ok and ans.get("regions") and p["region"] not in ans["regions"]:
@@ -82,17 +93,21 @@ def recommend(model, places, ans, top_n=3):
     if not candidates:  # 조건에 맞는 곳이 없으면 유사도 계산을 건너뛴다
         return [], excluded
 
+    index = {id(p): i for i, p in enumerate(places)}
+    docs = place_vecs[[index[id(p)] for p in candidates]]
     picks = answer_weights(ans)
     opts = model.encode([OPTION_TEXT[o] for o, _ in picks], convert_to_tensor=True)
-    docs = model.encode([p["desc"] for p in candidates], convert_to_tensor=True)
     sims = util.cos_sim(opts, docs)  # [보기 수, 장소 수]
+    liked_places = [(p, i) for i, p in enumerate(places) if p["id"] in liked]
+    like_sims = util.cos_sim(place_vecs[[i for _, i in liked_places]], docs) if liked_places else None
 
-    total_w = sum(w for _, w in picks)
     ranked = []
     for j, p in enumerate(candidates):
-        per_opt = [(o, w * sims[i][j].item()) for i, (o, w) in enumerate(picks)]
-        score = sum(s for _, s in per_opt) / total_w
-        best = max(per_opt, key=lambda x: x[1])[0]  # 추천 이유: 가장 크게 기여한 보기
+        per_opt = [(o, w, w * sims[i][j].item()) for i, (o, w) in enumerate(picks)]
+        per_opt += [(f"좋아요: {lp['name']}", LIKE_WEIGHT, LIKE_WEIGHT * like_sims[k][j].item())
+                    for k, (lp, _) in enumerate(liked_places) if lp["id"] != p["id"]]
+        score = sum(s for _, _, s in per_opt) / sum(w for _, w, _ in per_opt)
+        best = max(per_opt, key=lambda x: x[2])[0]  # 추천 이유: 가장 크게 기여한 보기
         ranked.append((p, score, best))
     ranked.sort(key=lambda x: x[1], reverse=True)
     return ranked[:top_n], excluded
