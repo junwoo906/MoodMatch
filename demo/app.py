@@ -1,5 +1,5 @@
 """MoodMatch 웹: 취향 질문지 5문항에 답하면 지금 갈 수 있는 팝업·전시·카페 Top 6를 추천한다.
-추천 결과 · 지도 · 찜한 곳으로 짜는 하루 코스를 탭으로 보여 준다.
+추천 결과 · 지도 · 찜한 곳으로 짜는 하루 코스를 골라 볼 수 있다.
 
 실행: streamlit run demo/app.py
 """
@@ -79,10 +79,15 @@ div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {
 
 
 @st.cache_resource(show_spinner="AI 모델을 불러오는 중… (처음 한 번만)")
-def load():
-    model = rec.load_model()
+def load_model():
+    return rec.load_model()
+
+
+@st.cache_resource(show_spinner="장소 데이터를 준비하는 중…")
+def load_places(version):
+    """version(places.json 수정 시각)이 바뀌면 = 데이터를 새로 받으면 다시 읽는다."""
     places = rec.load_places()
-    return model, places, rec.embed_places(model, places)
+    return places, rec.embed_places(load_model(), places)
 
 
 def reason_text(best):
@@ -122,7 +127,9 @@ def taste_card(ans):
 
 
 def km(a, b):
-    """두 장소 사이 직선거리(km)"""
+    """두 장소 사이 직선거리(km). 좌표가 없는 곳이 끼면 0으로 본다."""
+    if a.get("lat") is None or b.get("lat") is None:
+        return 0.0
     lat1, lon1, lat2, lon2 = map(radians, (a["lat"], a["lon"], b["lat"], b["lon"]))
     h = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
     return 6371 * 2 * asin(sqrt(h))
@@ -161,7 +168,7 @@ def show_map(ps, path=False):
                                    get_color=[255, 107, 91, 160], width_min_pixels=4))
     view = pdk.ViewState(latitude=df["lat"].mean(), longitude=df["lon"].mean(),
                          zoom=11 if len(ps) > 1 else 13)
-    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, map_style="light",
+    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view,  # 배경 지도는 Streamlit 기본(무료 Carto)
                              tooltip={"text": "{label}. {name}\n{info}"}), height=420)
     st.caption("  ".join(f"{TYPE_ICON[t]} {t}" for t in TYPES) + " — 핀 색: 팝업 빨강 · 전시 보라 · 카페 주황. "
                "뉴스로 찾은 팝업은 동네 대표 위치예요.")
@@ -190,8 +197,8 @@ def show_card(rank, p, score, best, day):
         fb = st.session_state.feedback
         liked = p["id"] in fb["liked"]
         c1, c2 = st.columns(2)
-        if c1.button("❤️ 찜함" if liked else "🤍 찜하기", key=f"like{p['id']}", disabled=liked, use_container_width=True):
-            fb["liked"].add(p["id"])
+        if c1.button("❤️ 찜 취소" if liked else "🤍 찜하기", key=f"like{p['id']}", use_container_width=True):
+            (fb["liked"].discard if liked else fb["liked"].add)(p["id"])
             st.rerun()
         if c2.button("👎 별로예요", key=f"dislike{p['id']}", use_container_width=True):
             fb["disliked"].add(p["id"])
@@ -239,7 +246,8 @@ st.markdown('<div class="hero"><h1>🎈 MoodMatch</h1>'
             '<p>취향 질문 몇 개에 답하면, 지금 갈 수 있는 서울의 팝업·전시·카페를 골라 드려요.</p></div>',
             unsafe_allow_html=True)
 
-model, places, place_vecs = load()
+model = load_model()
+places, place_vecs = load_places(rec.PLACES_FILE.stat().st_mtime if rec.PLACES_FILE.exists() else 0)
 if "feedback" not in st.session_state:
     st.session_state.feedback = {"liked": set(), "disliked": set()}
 if "answers" not in st.session_state:
@@ -267,6 +275,8 @@ if submitted:
             "types": types, "activity_rank": activity, "mood_rank": mood, "with": with_,
             "date": day.isoformat(), "regions": regions or None, "budget": BUDGETS[budget],
         }
+        # 찜은 다음 추천받기 때 반영한다 (찜을 누를 때마다 카드가 바뀌어 사라지지 않게)
+        st.session_state.liked_at_submit = set(st.session_state.feedback["liked"])
 
 with right:
     ans = st.session_state.answers
@@ -277,17 +287,22 @@ with right:
         fb = st.session_state.feedback
         visit = date.fromisoformat(ans["date"])
         top, _ = rec.recommend(model, places, ans, top_n=TOP_N, place_vecs=place_vecs,
-                               liked=fb["liked"], disliked=fb["disliked"])
+                               liked=st.session_state.get("liked_at_submit", set()), disliked=fb["disliked"])
         taste_card(ans)
-        tab_rec, tab_map, tab_course = st.tabs(["🎯 추천 결과", "🗺️ 지도로 보기", f"❤️ 찜·코스 ({len(fb['liked'])})"])
-        with tab_rec:
+        # 탭은 숨은 탭의 지도가 빈 화면으로 그려질 때가 있어서, 고른 화면 하나만 그리는 선택 버튼을 쓴다
+        views = ["🎯 추천 결과", "🗺️ 지도로 보기", f"❤️ 찜·코스 ({len(fb['liked'])})"]
+        view = st.radio("보기", range(3), format_func=lambda i: views[i], horizontal=True,
+                        label_visibility="collapsed", key="view")
+        if view == 0:
+            st.caption("🤍 찜한 곳은 ‘찜·코스’에 모이고, 다음에 추천받기를 누르면 비슷한 곳을 더 찾아 줘요. "
+                       "👎 별로예요는 바로 빼고 다른 곳으로 채워요.")
             if not top:
                 st.info("조건에 맞는 곳이 없어요. 날짜, 지역, 예산을 바꿔 보세요.")
             cols = st.columns(2, gap="medium")
             for i, (p, score, best) in enumerate(top, 1):
                 with cols[(i - 1) % 2]:
                     show_card(i, p, score, best, visit)
-        with tab_map:
+        elif view == 1:
             show_map([p for p, _, _ in top])
-        with tab_course:
+        else:
             show_course(places, visit)
