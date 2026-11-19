@@ -283,9 +283,9 @@ def show_mini(p, day):
 
 def show_browse(places, day, ans):
     """고른 지역의 팝업·전시·카페 전체 목록 (방문일에 열려 있는 곳만)"""
-    c1, c2, c3 = st.columns([1.3, 1.6, 1])
-    kinds = c1.pills("종류", TYPES, selection_mode="multi", default=TYPES, key="browse_types",
+    kinds = st.pills("종류", TYPES, selection_mode="multi", default=TYPES, key="browse_types",
                      format_func=lambda t: f"{TYPE_ICON[t]} {t}")
+    c2, c3 = st.columns([2.4, 1])  # 종류 버튼은 한 줄을 다 쓰고, 지역·정렬은 그 아래 줄에
     picked = (ans or {}).get("regions") or []  # 질문지에서 고른 지역을 기본으로 (질문지가 바뀌면 새로 맞춤)
     regions = c2.multiselect("지역 (비워 두면 서울 전체)", sorted({p["region"] for p in places}),
                              default=picked, key=f"browse_regions_{'_'.join(picked)}")
