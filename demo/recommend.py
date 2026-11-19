@@ -74,8 +74,9 @@ def answer_weights(ans):
     return picks
 
 
-def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=()):
+def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(), diverse=True):
     """1) 조건 필터(종류·날짜·지역·예산)는 코드로 거르고 2) 고른 보기와 소개글의 유사도를 가중 평균해 정렬한다.
+    diverse=True면 결과에 고른 종류·여러 지역이 섞이게 고른다(diversify).
     방문일(date)을 안 주면 오늘 날짜로 본다. place_vecs는 embed_places() 결과(없으면 여기서 계산).
     피드백: disliked(장소 id)는 빼고, liked(장소 id)와 소개글이 비슷한 곳은 점수를 더 준다."""
     day = ans.get("date") or date.today().isoformat()
@@ -113,7 +114,19 @@ def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(
         best = max(per_opt, key=lambda x: x[2])[0]  # 추천 이유: 가장 크게 기여한 보기
         ranked.append((p, score, best))
     ranked.sort(key=lambda x: x[1], reverse=True)
-    return ranked[:top_n], excluded
+    return (diversify(ranked, top_n) if diverse else ranked[:top_n]), excluded
+
+
+def diversify(ranked, top_n):
+    """한 종류·한 지역만 몰리지 않게, 아직 안 나온 종류 > 아직 안 나온 지역 > 점수 순으로 하나씩 고른다."""
+    picked, rest = [], list(ranked)
+    while rest and len(picked) < top_n:
+        types = {p["type"] for p, _, _ in picked}
+        regions = {p["region"] for p, _, _ in picked}
+        pick = max(rest, key=lambda x: (x[0]["type"] not in types, x[0]["region"] not in regions, x[1]))
+        rest.remove(pick)
+        picked.append(pick)
+    return picked
 
 
 ANSWERS = [
@@ -129,7 +142,7 @@ if __name__ == "__main__":
     places = load_places(SAMPLE_FILE)  # 예시 답변의 방문일(10/31)에 맞춘 테스트 데이터
     model = load_model()
     for ans in ANSWERS:
-        top, excluded = recommend(model, places, ans)
+        top, excluded = recommend(model, places, ans, diverse=False)  # 중간발표 결과(점수순) 그대로 재현
         print(f"\n=== {ans['who']}: 종류 {ans['types']} / 하고 싶은 것 {ans['activity_rank']} / "
               f"분위기 {ans['mood_rank']} / {ans['with']} (방문일 {ans['date']}, 예산 {ans['budget']:,}원) ===")
         for i, (p, s, best) in enumerate(top, 1):
