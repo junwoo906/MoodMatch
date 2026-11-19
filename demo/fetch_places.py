@@ -50,8 +50,8 @@ LWT_TYPE = {"POP_UP": "팝업", "ENTERTAINMENT": "전시"}  # 할인·매장 이
 NAVER_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 # 비용 안전장치: 네이버 검색 API 무료 한도(월 775,000건, 일 25,000건)보다 훨씬 낮게 잡고,
 # 호출할 때마다 횟수를 파일에 기록해 이 선을 넘으면 더 부르지 않는다. 절대 유료 구간에 가지 않게.
-NAVER_DAILY_LIMIT = 100      # 무료 일 한도의 0.4%
-NAVER_MONTHLY_LIMIT = 1000   # 무료 월 한도의 0.13%
+NAVER_DAILY_LIMIT = 20000    # 무료 일 한도(25,000)의 80%
+NAVER_MONTHLY_LIMIT = 700000 # 무료 월 한도(775,000)의 약 90% (콘솔 한도 설정과 같게)
 USAGE_FILE = Path(__file__).with_name(".api_usage.json")  # git에 올라가지 않음
 NAVER_QUERIES = ["팝업스토어 오픈", "성수 팝업스토어", "더현대 서울 팝업", "홍대 팝업스토어", "잠실 팝업스토어"]
 # 기사에 나온 장소 이름 → 구 (서울이 아닌 곳은 버린다)
