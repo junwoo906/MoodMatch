@@ -3,7 +3,7 @@
 - 전시: 서울 열린데이터광장 「서울시 문화행사 정보」 (분류 '전시/미술')
   API에 소개글이 비어 있으면 서울문화포털 상세 페이지(robots.txt 허용 경로)에서 소개글을 가져온다.
 - 팝업: 같은 API에서 제목에 '팝업'이 들어간 행사
-        + 네이버 검색 API(뉴스)에서 팝업 오픈 기사를 찾아 이름·기간·지역을 뽑는다 (기간을 못 뽑은 기사는 버림)
+        + 네이버 검색 API(뉴스, NAVER API HUB)에서 팝업 오픈 기사를 찾아 이름·기간·지역을 뽑는다 (기간을 못 뽑은 기사는 버림)
 - 카페: 한국관광공사 TourAPI (KorService2)
 
 API 키는 프로젝트 폴더의 .env 파일에 넣는다 (git에 올라가지 않음).
@@ -42,7 +42,8 @@ SEOUL_REGION = "11"            # 법정동 시도 코드: 서울
 CAFE_CATEGORY = ("FD", "FD05")  # 분류체계 대/중분류: 음식 > 카페·찻집 (키 발급 후 lclsSystmCode2로 확인 필요)
 CAFE_LIMIT = 40                # 카페는 소개글을 한 곳씩 따로 받아야 해서 개수를 제한 (하루 호출 한도 고려)
 
-NAVER_URL = "https://openapi.naver.com/v1/search/news.json"
+# 2026-07-31부터 검색 API 새 키는 네이버 클라우드 NAVER API HUB에서만 발급 (응답 형식은 키 발급 후 확인)
+NAVER_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 NAVER_QUERIES = ["팝업스토어 오픈", "성수 팝업스토어", "더현대 서울 팝업", "홍대 팝업스토어", "잠실 팝업스토어"]
 # 기사에 나온 장소 이름 → 구 (서울이 아닌 곳은 버린다)
 PLACE_GU = {
@@ -183,7 +184,7 @@ def news_gu(text):
 
 
 def fetch_news_popups(cid, secret):
-    headers = {"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": secret}
+    headers = {"X-NCP-APIGW-API-KEY-ID": cid, "X-NCP-APIGW-API-KEY": secret}
     popups = []
     for q in NAVER_QUERIES:
         r = requests.get(NAVER_URL, headers=headers, params={"query": q, "display": 100, "sort": "date"}, timeout=20)
