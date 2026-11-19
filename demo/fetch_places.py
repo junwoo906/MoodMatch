@@ -40,7 +40,7 @@ PORTAL_URL = "https://culture.seoul.go.kr/culture/culture/cultureEvent/view.do?c
 TOUR_URL = "https://apis.data.go.kr/B551011/KorService2"
 TOUR_COMMON = {"MobileOS": "ETC", "MobileApp": "MoodMatch", "_type": "json"}
 SEOUL_REGION = "11"            # 법정동 시도 코드: 서울
-CAFE_CATEGORY = ("FD", "FD05")  # 분류체계 대/중분류: 음식 > 카페·찻집 (키 발급 후 lclsSystmCode2로 확인 필요)
+CAFE_CATEGORY = ("FD", "FD05")  # 분류체계 대/중분류: 음식 > 카페/찻집 (lclsSystmCode2로 확인함)
 CAFE_LIMIT = 40                # 카페는 소개글을 한 곳씩 따로 받아야 해서 개수를 제한 (하루 호출 한도 고려)
 
 LWT_URL = "https://www.lwt.co.kr/api/event/list?lang=KO&pageNum=1&pageRow=100&type="
