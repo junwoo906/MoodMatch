@@ -1,4 +1,4 @@
-"""MoodMatch 웹: 취향 질문지 5문항에 답하면 지금 갈 수 있는 팝업·전시·카페 Top 3를 추천한다.
+"""MoodMatch 웹: 취향 질문지 5문항에 답하면 지금 갈 수 있는 팝업·전시·카페 Top 6를 추천한다.
 
 실행: streamlit run demo/app.py
 """
@@ -15,7 +15,8 @@ MOODS = ["귀여운", "조용한", "트렌디", "예술적", "레트로"]
 COMPANIONS = ["혼자", "친구", "연인", "가족"]
 BUDGETS = {"무료만": 0, "5천 원": 5000, "1만 원": 10000, "2만 원": 20000, "3만 원": 30000, "상관없음": 10**9}
 TYPE_ICON = {"팝업": "🛍️", "전시": "🖼️", "카페": "☕"}
-DESC_LEN = 140  # 카드에 보일 소개글 길이
+DESC_LEN = 110  # 카드에 보일 소개글 길이
+TOP_N = 6      # 추천 개수 (2열로 3줄)
 
 CSS = """
 <style>
@@ -31,8 +32,8 @@ header[data-testid="stHeader"] { background: transparent; }
 div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {
         background: #fff; border-radius: 18px; border: 1px solid #F6DDD3;
         box-shadow: 0 4px 14px rgba(255, 107, 91, .08); }
-.thumb { width: 100%; height: 200px; object-fit: cover; border-radius: 14px; display: block; }
-.noimg { height: 200px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+.thumb { width: 100%; height: 190px; object-fit: cover; border-radius: 14px; display: block; }
+.noimg { height: 190px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
          font-size: 64px; background: linear-gradient(135deg, #FFE1D6, #FFF1D9); }
 .title { font-size: 1.2rem; font-weight: 800; line-height: 1.35; margin: 0 0 6px; }
 .rank { display: inline-block; background: #FF6B5B; color: #fff; border-radius: 999px;
@@ -75,17 +76,16 @@ def period_text(p):
 
 def show_card(rank, p, score, best):
     with st.container(border=True):
-        img, body = st.columns([1, 1.7], gap="medium")
         if p.get("image"):
-            img.markdown(f'<img class="thumb" src="{escape(p["image"])}" alt="">', unsafe_allow_html=True)
+            st.markdown(f'<img class="thumb" src="{escape(p["image"])}" alt="">', unsafe_allow_html=True)
         else:  # 사진이 없는 곳(뉴스로 찾은 팝업)은 종류 아이콘으로
-            img.markdown(f'<div class="noimg">{TYPE_ICON.get(p["type"], "🎈")}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="noimg">{TYPE_ICON.get(p["type"], "🎈")}</div>', unsafe_allow_html=True)
 
         price = "가격 미확인" if p["price"] is None else ("무료" if p["price"] == 0 else f"{p['price']:,}원")
         chips = [f"{TYPE_ICON.get(p['type'], '')} {p['type']}", f"📍 {p['region']}", f"💳 {price}", f"📅 {period_text(p)}"]
         desc = p["desc"] if len(p["desc"]) <= DESC_LEN else p["desc"][:DESC_LEN] + "…"
         link = f' <a href="{escape(p["source"])}" target="_blank">공식 안내 →</a>' if p.get("source") else ""
-        body.markdown(
+        st.markdown(
             f'<div class="title"><span class="rank">{rank}</span>{escape(p["name"])}</div>'
             + "".join(f'<span class="chip">{escape(c)}</span>' for c in chips)
             + f'<div class="reason">💡 {escape(reason_text(best))} <small>(점수 {score:.2f})</small></div>'
@@ -93,7 +93,7 @@ def show_card(rank, p, score, best):
             unsafe_allow_html=True)
 
         fb = st.session_state.feedback
-        c1, c2, _ = body.columns([1, 1, 1.2])
+        c1, c2 = st.columns(2)
         if c1.button("👍 좋아요", key=f"like{p['id']}", disabled=p["id"] in fb["liked"], use_container_width=True):
             fb["liked"].add(p["id"])
             st.rerun()
@@ -145,13 +145,15 @@ with right:
                     f'지금 열려 있는 {len(places)}곳 중에서 골라 드려요.</div>', unsafe_allow_html=True)
     else:
         fb = st.session_state.feedback
-        top, excluded = rec.recommend(model, places, ans, place_vecs=place_vecs,
-                                      liked=fb["liked"], disliked=fb["disliked"])
+        top, _ = rec.recommend(model, places, ans, top_n=TOP_N, place_vecs=place_vecs,
+                               liked=fb["liked"], disliked=fb["disliked"])
         st.markdown('<div class="section">🎯 오늘의 추천</div>', unsafe_allow_html=True)
         if not top:
             st.info("조건에 맞는 곳이 없어요. 날짜, 지역, 예산을 바꿔 보세요.")
+        cols = st.columns(2, gap="medium")
         for i, (p, score, best) in enumerate(top, 1):
-            show_card(i, p, score, best)
+            with cols[(i - 1) % 2]:
+                show_card(i, p, score, best)
 
         if fb["liked"] or fb["disliked"]:
             names = {p["id"]: p["name"] for p in places}
@@ -160,6 +162,3 @@ with right:
             if st.button("피드백 초기화"):
                 st.session_state.feedback = {"liked": set(), "disliked": set()}
                 st.rerun()
-        with st.expander(f"조건에 안 맞아서 뺀 곳 ({len(excluded)}곳)"):
-            for name, why in excluded:
-                st.write(f"- {name} — {why}")

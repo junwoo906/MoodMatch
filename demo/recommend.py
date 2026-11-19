@@ -118,12 +118,12 @@ def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(
 
 
 def diversify(ranked, top_n):
-    """한 종류·한 지역만 몰리지 않게, 아직 안 나온 종류 > 아직 안 나온 지역 > 점수 순으로 하나씩 고른다."""
+    """한 종류·한 지역만 몰리지 않게, 덜 나온 종류 > 아직 안 나온 지역 > 점수 순으로 하나씩 고른다."""
     picked, rest = [], list(ranked)
     while rest and len(picked) < top_n:
-        types = {p["type"] for p, _, _ in picked}
+        types = [p["type"] for p, _, _ in picked]
         regions = {p["region"] for p, _, _ in picked}
-        pick = max(rest, key=lambda x: (x[0]["type"] not in types, x[0]["region"] not in regions, x[1]))
+        pick = max(rest, key=lambda x: (-types.count(x[0]["type"]), x[0]["region"] not in regions, x[1]))
         rest.remove(pick)
         picked.append(pick)
     return picked
