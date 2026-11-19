@@ -6,6 +6,7 @@
         + 롯데월드몰 공식 사이트 행사 목록(robots.txt 전체 허용, '팝업'·'엔터테인먼트' 분류만)
         + 네이버 검색 API(뉴스, NAVER API HUB)에서 팝업 오픈 기사를 찾아 이름·기간·지역을 뽑는다 (기간을 못 뽑은 기사는 버림)
 - 카페: 한국관광공사 TourAPI (KorService2)
+- 사진(image): 각 출처가 주는 대표 이미지 주소. 뉴스 팝업은 사진이 없어 None.
 
 API 키는 프로젝트 폴더의 .env 파일에 넣는다 (git에 올라가지 않음).
     SEOUL_API_KEY=...   (없으면 테스트용 'sample' 키로 5건만 받음)
@@ -127,6 +128,7 @@ def from_seoul(row, kind):
         "desc": desc,
         "place": row["PLACE"],
         "source": row["ORG_LINK"] or row["HMPG_ADDR"],
+        "image": row["MAIN_IMG"] or None,
     }
 
 
@@ -169,6 +171,7 @@ def fetch_lwt():
             "desc": f"{name}. {loc}에서 열리는 행사. {body}"[:300],
             "place": loc,
             "source": "https://www.lwt.co.kr",
+            "image": f"https://www.lwt.co.kr{it['thumbImgUri']}" if it.get("thumbImgUri") else None,
         })
     return places
 
@@ -283,6 +286,7 @@ def fetch_news_popups(cid, secret):
                 "desc": f"{title}. {body}",
                 "place": "",
                 "source": it["originallink"] or it["link"],
+                "image": None,  # 뉴스 검색 API는 사진을 주지 않는다
             }
             if not any(same_popup(item, p) for p in popups):  # 같은 팝업을 다룬 다른 기사는 버림
                 popups.append(item)
@@ -310,6 +314,7 @@ def fetch_cafes(key):
             "desc": " ".join(overview.split())[:300],
             "place": it["addr1"],
             "source": f"https://korean.visitkorea.or.kr/detail/ms_detail.do?cotid={it['contentid']}",
+            "image": it.get("firstimage") or it.get("firstimage2") or None,
         })
     return cafes
 
