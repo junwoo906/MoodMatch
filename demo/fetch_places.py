@@ -7,6 +7,7 @@
         + 네이버 검색 API(뉴스, NAVER API HUB)에서 팝업 오픈 기사를 찾아 이름·기간·지역을 뽑는다 (기간을 못 뽑은 기사는 버림)
 - 카페: 한국관광공사 TourAPI (KorService2)
 - 사진(image): 각 출처가 주는 대표 이미지 주소. 뉴스 팝업은 사진이 없어 None.
+- 좌표(lat, lon): API가 주는 좌표. 롯데월드몰은 건물 위치, 뉴스 팝업은 기사에 나온 동네의 대표 지점.
 
 API 키는 프로젝트 폴더의 .env 파일에 넣는다 (git에 올라가지 않음).
     SEOUL_API_KEY=...   (없으면 테스트용 'sample' 키로 5건만 받음)
@@ -55,15 +56,22 @@ NAVER_DAILY_LIMIT = 20000    # 무료 일 한도(25,000)의 80%
 NAVER_MONTHLY_LIMIT = 700000 # 무료 월 한도(775,000)의 약 90% (콘솔 한도 설정과 같게)
 USAGE_FILE = Path(__file__).with_name(".api_usage.json")  # git에 올라가지 않음
 NAVER_QUERIES = ["팝업스토어 오픈", "성수 팝업스토어", "더현대 서울 팝업", "홍대 팝업스토어", "잠실 팝업스토어"]
-# 기사에 나온 장소 이름 → 구 (서울이 아닌 곳은 버린다)
+# 기사에 나온 장소 이름 → (구, 위도, 경도). 지도용 좌표는 그 동네의 대표 지점(대략). 서울이 아닌 곳은 버린다
 PLACE_GU = {
-    "성수": "성동구", "서울숲": "성동구", "더현대": "영등포구", "여의도": "영등포구", "IFC몰": "영등포구",
-    "홍대": "마포구", "연남": "마포구", "합정": "마포구", "망원": "마포구", "잠실": "송파구", "롯데월드몰": "송파구",
-    "코엑스": "강남구", "압구정": "강남구", "가로수길": "강남구", "신사": "강남구", "강남": "강남구", "청담": "강남구",
-    "명동": "중구", "을지로": "중구", "DDP": "중구", "동대문": "중구", "신세계백화점 본점": "중구", "롯데백화점 본점": "중구",
-    "용산": "용산구", "한남": "용산구", "이태원": "용산구", "삼청": "종로구", "인사동": "종로구", "익선": "종로구",
-    "신촌": "서대문구", "타임스퀘어": "영등포구", "영등포": "영등포구",
+    "성수": ("성동구", 37.5445, 127.0560), "서울숲": ("성동구", 37.5444, 127.0374),
+    "더현대": ("영등포구", 37.5259, 126.9284), "여의도": ("영등포구", 37.5219, 126.9245), "IFC몰": ("영등포구", 37.5251, 126.9255),
+    "홍대": ("마포구", 37.5563, 126.9236), "연남": ("마포구", 37.5660, 126.9250), "합정": ("마포구", 37.5496, 126.9139),
+    "망원": ("마포구", 37.5560, 126.9100), "잠실": ("송파구", 37.5133, 127.1001), "롯데월드몰": ("송파구", 37.5126, 127.1025),
+    "코엑스": ("강남구", 37.5116, 127.0595), "압구정": ("강남구", 37.5271, 127.0285), "가로수길": ("강남구", 37.5208, 127.0230),
+    "신사": ("강남구", 37.5164, 127.0203), "강남": ("강남구", 37.4979, 127.0276), "청담": ("강남구", 37.5247, 127.0471),
+    "명동": ("중구", 37.5636, 126.9850), "을지로": ("중구", 37.5660, 126.9910), "DDP": ("중구", 37.5665, 127.0092),
+    "동대문": ("중구", 37.5665, 127.0092), "신세계백화점 본점": ("중구", 37.5609, 126.9810),
+    "롯데백화점 본점": ("중구", 37.5647, 126.9817), "용산": ("용산구", 37.5299, 126.9648), "한남": ("용산구", 37.5345, 127.0026),
+    "이태원": ("용산구", 37.5345, 126.9946), "삼청": ("종로구", 37.5826, 126.9817), "인사동": ("종로구", 37.5740, 126.9850),
+    "익선": ("종로구", 37.5744, 126.9895), "신촌": ("서대문구", 37.5551, 126.9368),
+    "타임스퀘어": ("영등포구", 37.5171, 126.9033), "영등포": ("영등포구", 37.5157, 126.9076),
 }
+LWT_COORD = (37.5126, 127.1025)  # 롯데월드몰
 
 
 def won(text):
@@ -108,6 +116,16 @@ def portal_desc(cultcode):
     return after[:300] if found else ""
 
 
+def coord(a, b):
+    """두 숫자 중 위도(30~40)를 앞에 놓아 (위도, 경도)로. 없거나 이상하면 (None, None)."""
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return None, None
+    lat, lon = (a, b) if 30 < a < 40 else (b, a)
+    return (lat, lon) if 30 < lat < 40 and 120 < lon < 135 else (None, None)
+
+
 def from_seoul(row, kind):
     start, end = row["STRTDATE"][:10], row["END_DATE"][:10]
     cult = re.search(r"cultcode=(\d+)", row["HMPG_ADDR"])
@@ -129,6 +147,7 @@ def from_seoul(row, kind):
         "place": row["PLACE"],
         "source": row["ORG_LINK"] or row["HMPG_ADDR"],
         "image": row["MAIN_IMG"] or None,
+        **dict(zip(("lat", "lon"), coord(row["LAT"], row["LOT"]))),
     }
 
 
@@ -172,6 +191,7 @@ def fetch_lwt():
             "place": loc,
             "source": "https://www.lwt.co.kr",
             "image": f"https://www.lwt.co.kr{it['thumbImgUri']}" if it.get("thumbImgUri") else None,
+            "lat": LWT_COORD[0], "lon": LWT_COORD[1],
         })
     return places
 
@@ -238,9 +258,10 @@ def news_name(title):
 
 
 def news_gu(text):
-    for place, g in PLACE_GU.items():
+    """기사에 나온 첫 장소의 (구, 위도, 경도). 없으면 None."""
+    for place, info in PLACE_GU.items():
         if place in text:
-            return g
+            return info
     return None
 
 
@@ -271,15 +292,15 @@ def fetch_news_popups(cid, secret):
             if "팝업" not in title or re.search(r"성료|마무리|종료|막\s?내려", title):
                 continue
             pub = date(*time.strptime(it["pubDate"][5:16], "%d %b %Y")[:3])
-            period, region = news_period(body + " " + title, pub), news_gu(title + " " + body)
-            if not period or not region:  # 기간이나 서울 장소를 모르면 추천할 수 없어서 버린다
+            period, where = news_period(body + " " + title, pub), news_gu(title + " " + body)
+            if not period or not where:  # 기간이나 서울 장소를 모르면 추천할 수 없어서 버린다
                 continue
             name = news_name(title)
             item = {
                 "id": f"news-{name}",
                 "name": name,
                 "type": "팝업",
-                "region": region,
+                "region": where[0],
                 "start": period[0],
                 "end": period[1],
                 "price": None,
@@ -287,6 +308,7 @@ def fetch_news_popups(cid, secret):
                 "place": "",
                 "source": it["originallink"] or it["link"],
                 "image": None,  # 뉴스 검색 API는 사진을 주지 않는다
+                "lat": where[1], "lon": where[2],
             }
             if not any(same_popup(item, p) for p in popups):  # 같은 팝업을 다룬 다른 기사는 버림
                 popups.append(item)
@@ -315,6 +337,7 @@ def fetch_cafes(key):
             "place": it["addr1"],
             "source": f"https://korean.visitkorea.or.kr/detail/ms_detail.do?cotid={it['contentid']}",
             "image": it.get("firstimage") or it.get("firstimage2") or None,
+            **dict(zip(("lat", "lon"), coord(it.get("mapy"), it.get("mapx")))),
         })
     return cafes
 
