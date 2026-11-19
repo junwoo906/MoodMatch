@@ -3,6 +3,7 @@
 - 전시: 서울 열린데이터광장 「서울시 문화행사 정보」 (분류 '전시/미술')
   API에 소개글이 비어 있으면 서울문화포털 상세 페이지(robots.txt 허용 경로)에서 소개글을 가져온다.
 - 팝업: 같은 API에서 제목에 '팝업'이 들어간 행사
+        + 롯데월드몰 공식 사이트 행사 목록(robots.txt 전체 허용, '팝업'·'엔터테인먼트' 분류만)
         + 네이버 검색 API(뉴스, NAVER API HUB)에서 팝업 오픈 기사를 찾아 이름·기간·지역을 뽑는다 (기간을 못 뽑은 기사는 버림)
 - 카페: 한국관광공사 TourAPI (KorService2)
 
@@ -41,6 +42,9 @@ TOUR_COMMON = {"MobileOS": "ETC", "MobileApp": "MoodMatch", "_type": "json"}
 SEOUL_REGION = "11"            # 법정동 시도 코드: 서울
 CAFE_CATEGORY = ("FD", "FD05")  # 분류체계 대/중분류: 음식 > 카페·찻집 (키 발급 후 lclsSystmCode2로 확인 필요)
 CAFE_LIMIT = 40                # 카페는 소개글을 한 곳씩 따로 받아야 해서 개수를 제한 (하루 호출 한도 고려)
+
+LWT_URL = "https://www.lwt.co.kr/api/event/list?lang=KO&pageNum=1&pageRow=100&type="
+LWT_TYPE = {"POP_UP": "팝업", "ENTERTAINMENT": "전시"}  # 할인·매장 이벤트는 제외
 
 # 2026-07-31부터 검색 API 새 키는 네이버 클라우드 NAVER API HUB에서만 발급 (응답 형식은 키 발급 후 확인)
 NAVER_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
@@ -133,6 +137,35 @@ def tour(op, key, **params):
     body = r.json()["response"]["body"]
     items = body["items"]["item"] if body.get("items") else []
     return items if isinstance(items, list) else [items]
+
+
+def fetch_lwt():
+    """롯데월드몰 행사 목록(JSON)에서 팝업과 전시성 행사를 가져온다."""
+    try:
+        items = requests.get(LWT_URL, timeout=20).json()
+    except (requests.RequestException, ValueError):
+        print("롯데월드몰 행사 목록을 받지 못했습니다.")
+        return []
+    places = []
+    for it in items:
+        name = it["eventNm"]["ko"].strip()
+        if it["type"] not in LWT_TYPE or re.search(r"외국인|Foreign", name):
+            continue
+        body = clean((it.get("content") or {}).get("ko") or "")
+        loc = (it.get("loc") or "롯데월드몰").strip()
+        places.append({
+            "id": f"lwt-{it['seq']}",
+            "name": name,
+            "type": LWT_TYPE[it["type"]],
+            "region": "송파구",
+            "start": it["startDate"].replace(".", "-"),
+            "end": it["endDate"].replace(".", "-"),
+            "price": None,
+            "desc": f"{name}. {loc}에서 열리는 행사. {body}"[:300],
+            "place": loc,
+            "source": "https://www.lwt.co.kr",
+        })
+    return places
 
 
 def clean(text):
@@ -245,6 +278,8 @@ def main():
         print("SEOUL_API_KEY가 없어 테스트용 sample 키로 받습니다 (분류별 5건만).")
 
     exhibitions, popups = fetch_seoul(seoul_key)
+    for p in fetch_lwt():
+        (popups if p["type"] == "팝업" else exhibitions).append(p)
     if all(naver):
         popups += fetch_news_popups(*naver)
     else:
