@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .env
 docs/
+demo/.api_usage.json

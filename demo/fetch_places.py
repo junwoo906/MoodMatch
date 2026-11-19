@@ -48,6 +48,11 @@ LWT_TYPE = {"POP_UP": "팝업", "ENTERTAINMENT": "전시"}  # 할인·매장 이
 
 # 2026-07-31부터 검색 API 새 키는 네이버 클라우드 NAVER API HUB에서만 발급 (응답 형식은 키 발급 후 확인)
 NAVER_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
+# 비용 안전장치: 네이버 검색 API 무료 한도(월 775,000건, 일 25,000건)보다 훨씬 낮게 잡고,
+# 호출할 때마다 횟수를 파일에 기록해 이 선을 넘으면 더 부르지 않는다. 절대 유료 구간에 가지 않게.
+NAVER_DAILY_LIMIT = 100      # 무료 일 한도의 0.4%
+NAVER_MONTHLY_LIMIT = 1000   # 무료 월 한도의 0.13%
+USAGE_FILE = Path(__file__).with_name(".api_usage.json")  # git에 올라가지 않음
 NAVER_QUERIES = ["팝업스토어 오픈", "성수 팝업스토어", "더현대 서울 팝업", "홍대 팝업스토어", "잠실 팝업스토어"]
 # 기사에 나온 장소 이름 → 구 (서울이 아닌 곳은 버린다)
 PLACE_GU = {
@@ -216,10 +221,27 @@ def news_gu(text):
     return None
 
 
+def naver_call_allowed():
+    """오늘·이번 달 네이버 호출 횟수를 확인하고, 한도 안이면 1회를 기록하고 True."""
+    usage = json.loads(USAGE_FILE.read_text(encoding="utf-8")) if USAGE_FILE.exists() else {}
+    day, month = TODAY, TODAY[:7]
+    used_day = usage.get("day", {}).get(day, 0)
+    used_month = usage.get("month", {}).get(month, 0)
+    if used_day >= NAVER_DAILY_LIMIT or used_month >= NAVER_MONTHLY_LIMIT:
+        print(f"네이버 호출 안전 한도 도달 (오늘 {used_day}/{NAVER_DAILY_LIMIT}, 이번 달 {used_month}/{NAVER_MONTHLY_LIMIT}) → 더 부르지 않습니다.")
+        return False
+    usage["day"] = {day: used_day + 1}  # 오늘 것만 남긴다
+    usage["month"] = {**usage.get("month", {}), month: used_month + 1}
+    USAGE_FILE.write_text(json.dumps(usage), encoding="utf-8")
+    return True
+
+
 def fetch_news_popups(cid, secret):
     headers = {"X-NCP-APIGW-API-KEY-ID": cid, "X-NCP-APIGW-API-KEY": secret}
     popups = []
     for q in NAVER_QUERIES:
+        if not naver_call_allowed():
+            break
         r = requests.get(NAVER_URL, headers=headers, params={"query": q, "display": 100, "sort": "date"}, timeout=20)
         for it in r.json().get("items", []):
             title, body = clean(it["title"]), clean(it["description"])
