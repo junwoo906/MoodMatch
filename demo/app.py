@@ -71,12 +71,18 @@ div[data-testid="stForm"] { padding: 26px 24px; }
 .stFormSubmitButton button:hover { background: #0077ED; color: #fff; }
 
 /* 보기 선택: 애플식 세그먼트 버튼 */
-.st-key-view div[role="radiogroup"] { background: #E8E8ED; border-radius: 980px; padding: 4px; gap: 2px;
-  display: inline-flex; flex-wrap: wrap; margin-bottom: 14px; }
-.st-key-view label { border-radius: 980px; padding: 6px 16px; margin: 0 !important; cursor: pointer; transition: all .2s; }
-.st-key-view label > div:first-child { display: none; }
-.st-key-view label:has(input:checked) { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
-.st-key-view label p { font-weight: 600; font-size: .92rem; }
+.st-key-view [role="radiogroup"] { background: #E8E8ED; border-radius: 980px; padding: 4px; gap: 2px;
+  display: flex; flex-wrap: nowrap; width: fit-content; max-width: 100%; overflow-x: auto; scrollbar-width: none;
+  margin-bottom: 14px; }
+.st-key-view [role="radiogroup"] > div { margin: 0 !important; flex: 0 0 auto; }
+.st-key-view [data-testid="stRadioOption"] { border-radius: 980px; padding: 7px 15px; margin: 0 !important;
+  cursor: pointer; transition: background .2s, box-shadow .2s; white-space: nowrap; }
+.st-key-view [data-testid="stRadioOption"]:hover { background: rgba(255,255,255,.55); }
+/* 라디오 동그라미 숨기기 (글자만 남김) */
+.st-key-view [data-testid="stRadioOption"] > div > div:not([data-testid="stMarkdownContainer"]) { display: none; }
+.st-key-view [data-testid="stRadioOption"][data-selected="true"] { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.st-key-view [data-testid="stRadioOption"] p { font-weight: 600; font-size: .9rem; color: var(--ink); margin: 0; }
+.st-key-view [data-testid="stRadioOption"]:not([data-selected="true"]) p { color: #424245; }
 
 /* 나의 취향 유형: 검은 타일 */
 .taste { background: #1D1D1F; color: #F5F5F7; border-radius: 22px; padding: 22px 26px; margin-bottom: 16px;
@@ -120,7 +126,8 @@ div[data-testid="stForm"] { padding: 26px 24px; }
 .tbar { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: .92rem; }
 .tbar span { width: 52px; color: var(--ink); font-weight: 600; }
 .tbar i { height: 10px; border-radius: 999px; display: block; transition: width .4s; }
-@media (max-width: 640px) { .hero h1 { font-size: 2.3rem; } .hero p { font-size: 1.05rem; } }
+@media (max-width: 640px) { .hero h1 { font-size: 2.3rem; } .hero p { font-size: 1.05rem; }
+  .st-key-view [role="radiogroup"] { flex-wrap: wrap; border-radius: 20px; } }
 </style>
 """
 
