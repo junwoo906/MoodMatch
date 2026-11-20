@@ -1,4 +1,4 @@
-# 웹 실행용 (배포 서버가 설치). AI 모델 계산은 미리 해 둔 vectors.npz를 쓰므로 필요 없다.
+# Web app (installed by the deploy server). Embeddings are precomputed in demo/vectors.npz.
 streamlit
 numpy
 requests
