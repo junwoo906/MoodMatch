@@ -1,7 +1,5 @@
-# 배포 서버(Streamlit Community Cloud)에는 GPU가 없으니 가벼운 CPU용 torch를 받는다
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-sentence-transformers
+# 웹 실행용 (배포 서버가 설치). AI 모델 계산은 미리 해 둔 vectors.npz를 쓰므로 필요 없다.
 streamlit
+numpy
 requests
 python-dotenv

@@ -371,6 +371,9 @@ def main():
     count = {t: sum(p["type"] == t for p in places) for t in ("전시", "팝업", "카페")}
     print(f"{OUT_FILE.name} 저장: 총 {len(places)}곳 {count} (기준일 {TODAY})")
 
+    import recommend  # 새 데이터의 임베딩을 미리 계산해 둔다 (웹이 AI 모델 없이 빨리 뜨게)
+    recommend.build_vectors()
+
 
 if __name__ == "__main__":
     main()

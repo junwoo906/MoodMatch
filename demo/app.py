@@ -125,16 +125,13 @@ div[data-testid="stForm"] { padding: 26px 24px; }
 """
 
 
-@st.cache_resource(show_spinner="AI 모델을 불러오는 중… (처음 한 번만)")
-def load_model():
-    return rec.load_model()
-
-
-@st.cache_resource(show_spinner="장소 데이터를 준비하는 중…")
-def load_places(version):
-    """version(places.json 수정 시각)이 바뀌면 = 데이터를 새로 받으면 다시 읽는다."""
+@st.cache_resource(show_spinner="추천 데이터를 불러오는 중…")
+def load_data(version):
+    """미리 계산한 벡터 표와 장소 데이터를 읽는다. AI 모델은 불러오지 않아서 금방 뜬다.
+    version(데이터 파일 수정 시각)이 바뀌면 = 데이터를 새로 받으면 다시 읽는다."""
+    model = rec.load_model()
     places = rec.load_places()
-    return places, rec.embed_places(load_model(), places)
+    return model, places, rec.embed_places(model, places)
 
 
 def reason_text(best):
@@ -569,8 +566,8 @@ st.markdown('<div class="hero"><div class="eyebrow">MoodMatch</div>'
             '<p>취향 질문 몇 개에 답하면, 지금 갈 수 있는 서울의 팝업·전시·카페를 골라 드려요.</p></div>',
             unsafe_allow_html=True)
 
-model = load_model()
-places, place_vecs = load_places(rec.PLACES_FILE.stat().st_mtime if rec.PLACES_FILE.exists() else 0)
+model, places, place_vecs = load_data(tuple(f.stat().st_mtime if f.exists() else 0
+                                            for f in (rec.PLACES_FILE, rec.VECS_FILE)))
 if "feedback" not in st.session_state:
     st.session_state.feedback = {"liked": set(), "disliked": set()}
 if "answers" not in st.session_state:

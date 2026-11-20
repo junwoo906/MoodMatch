@@ -1,14 +1,18 @@
 """MoodMatch 추천 데모: 취향 질문지 답변(객관식)과 장소 소개글의 의미 유사도로 추천한다.
 
 보기마다 설명 문장을 미리 정해 두고, 그 문장과 장소 소개글을 무료 로컬 임베딩 모델로 비교한다.
-장소마다 태그를 붙일 필요가 없고 API 비용도 들지 않는다. (처음 실행 시 모델을 한 번 내려받음)
+장소마다 태그를 붙일 필요가 없고 API 비용도 들지 않는다.
+
+웹이 빨리 뜨도록 임베딩(문장 → 숫자 벡터)은 데이터를 받을 때 한 번만 계산해 vectors.npz에 저장해 둔다.
+웹(app.py)은 이 파일만 읽으므로 AI 모델(PyTorch)을 불러오지 않는다.
+  - 다시 계산: python demo/recommend.py --build  (fetch_places.py는 끝날 때 자동으로 실행)
 """
 import json
 import sys
 from datetime import date
 from pathlib import Path
 
-from sentence_transformers import SentenceTransformer, util
+import numpy as np
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -39,11 +43,44 @@ LIKE_WEIGHT = 0.7  # 좋아요한 장소와 비슷한 정도를 보기 하나만
 DISLIKE_PENALTY = 0.3  # 별로예요한 장소와 많이 비슷하면 점수를 깎는다
 PLACES_FILE = Path(__file__).with_name("places.json")  # fetch_places.py로 받은 실제 데이터
 SAMPLE_FILE = Path(__file__).with_name("places_sample.json")  # 중간발표 때 쓴 테스트 데이터
+VECS_FILE = Path(__file__).with_name("vectors.npz")  # 미리 계산한 임베딩 (문장 → 벡터)
+
+
+def build_vectors():
+    """보기 설명 문장과 장소 소개글(실제 + 테스트 데이터)을 임베딩해 vectors.npz로 저장한다.
+    데이터를 새로 받았을 때만 실행하면 된다. 이때만 AI 모델이 필요하다."""
+    from sentence_transformers import SentenceTransformer  # 무거워서 여기서만 불러온다
+
+    texts = list(OPTION_TEXT.values())
+    for path in (PLACES_FILE, SAMPLE_FILE):
+        if path.exists():
+            texts += [p["desc"] for p in json.loads(path.read_text(encoding="utf-8"))]
+    texts = list(dict.fromkeys(texts))  # 중복 제거 (순서 유지)
+    vecs = SentenceTransformer(MODEL).encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    np.savez_compressed(VECS_FILE, texts=np.array(texts), vecs=vecs.astype(np.float32))
+    print(f"{VECS_FILE.name} 저장: 문장 {len(texts)}개")
 
 
 def load_model():
-    """임베딩 모델을 불러온다. 느리므로 프로그램에서 한 번만 불러서 재사용한다."""
-    return SentenceTransformer(MODEL)
+    """미리 계산한 벡터 표를 읽는다 ({문장: 벡터}). 이름은 예전(AI 모델을 불러오던 때) 그대로 둔다."""
+    if not VECS_FILE.exists():
+        raise FileNotFoundError("vectors.npz가 없어요. 먼저 python demo/recommend.py --build 를 실행하세요.")
+    data = np.load(VECS_FILE)
+    return dict(zip(data["texts"].tolist(), data["vecs"]))
+
+
+def encode(model, texts):
+    """문장들의 벡터(길이 1로 맞춘 것)를 표에서 찾아 [문장 수, 차원] 배열로."""
+    missing = [t[:30] for t in texts if t not in model]
+    if missing:
+        raise KeyError(f"벡터가 없는 문장 {len(missing)}개 (예: {missing[0]}…). "
+                       "데이터가 바뀌었으면 python demo/recommend.py --build 를 실행하세요.")
+    return np.stack([model[t] for t in texts])
+
+
+def cos_sim(a, b):
+    """코사인 유사도: 벡터 길이를 1로 맞춰 두었으니 내적과 같다. [a 개수, b 개수]"""
+    return a @ b.T
 
 
 def load_places(path=PLACES_FILE):
@@ -53,8 +90,8 @@ def load_places(path=PLACES_FILE):
 
 
 def embed_places(model, places):
-    """장소 소개글을 미리 임베딩해 둔다. 장소가 많아도 추천할 때마다 다시 계산하지 않게."""
-    return model.encode([p["desc"] for p in places], convert_to_tensor=True)
+    """장소 소개글 벡터를 장소 순서대로 모아 둔다. 추천할 때마다 다시 찾지 않게."""
+    return encode(model, [p["desc"] for p in places])
 
 
 def is_open(place, day):
@@ -104,21 +141,21 @@ def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(
     index = {id(p): i for i, p in enumerate(places)}
     docs = place_vecs[[index[id(p)] for p in candidates]]
     picks = answer_weights(ans)
-    opts = model.encode([OPTION_TEXT[o] for o, _ in picks], convert_to_tensor=True)
-    sims = util.cos_sim(opts, docs)  # [보기 수, 장소 수]
+    opts = encode(model, [OPTION_TEXT[o] for o, _ in picks])
+    sims = cos_sim(opts, docs)  # [보기 수, 장소 수]
     liked_places = [(p, i) for i, p in enumerate(places) if p["id"] in liked]
-    like_sims = util.cos_sim(place_vecs[[i for _, i in liked_places]], docs) if liked_places else None
+    like_sims = cos_sim(place_vecs[[i for _, i in liked_places]], docs) if liked_places else None
     disliked_idx = [i for i, p in enumerate(places) if p["id"] in disliked]
-    dis_sims = util.cos_sim(place_vecs[disliked_idx], docs) if disliked_idx else None
+    dis_sims = cos_sim(place_vecs[disliked_idx], docs) if disliked_idx else None
 
     ranked = []
     for j, p in enumerate(candidates):
-        per_opt = [(o, w, w * sims[i][j].item()) for i, (o, w) in enumerate(picks)]
-        per_opt += [(f"좋아요: {lp['name']}", LIKE_WEIGHT, LIKE_WEIGHT * like_sims[k][j].item())
+        per_opt = [(o, w, w * float(sims[i, j])) for i, (o, w) in enumerate(picks)]
+        per_opt += [(f"좋아요: {lp['name']}", LIKE_WEIGHT, LIKE_WEIGHT * float(like_sims[k, j]))
                     for k, (lp, _) in enumerate(liked_places) if lp["id"] != p["id"]]
         score = sum(s for _, _, s in per_opt) / sum(w for _, w, _ in per_opt)
         if dis_sims is not None:  # 별로예요한 곳 중 가장 비슷한 곳만큼 감점
-            score -= DISLIKE_PENALTY * dis_sims[:, j].max().item()
+            score -= DISLIKE_PENALTY * float(dis_sims[:, j].max())
         best = max(per_opt, key=lambda x: x[2])[0]  # 추천 이유: 가장 크게 기여한 보기
         ranked.append((p, score, best))
     ranked.sort(key=lambda x: x[1], reverse=True)
@@ -133,11 +170,11 @@ def taste_profile(model, places, place_vecs, liked, disliked, options):
     di = [idx[i] for i in disliked if i in idx]
     if not li:
         return []
-    opts = model.encode([OPTION_TEXT[o] for o in options], convert_to_tensor=True)
-    base = util.cos_sim(opts, place_vecs).mean(dim=1)  # 보기마다 모든 장소와의 평균 유사도(기준선)
-    pref = util.cos_sim(opts, place_vecs[li]).mean(dim=1) - base
+    opts = encode(model, [OPTION_TEXT[o] for o in options])
+    base = cos_sim(opts, place_vecs).mean(axis=1)  # 보기마다 모든 장소와의 평균 유사도(기준선)
+    pref = cos_sim(opts, place_vecs[li]).mean(axis=1) - base
     if di:
-        pref = pref - 0.5 * (util.cos_sim(opts, place_vecs[di]).mean(dim=1) - base)
+        pref = pref - 0.5 * (cos_sim(opts, place_vecs[di]).mean(axis=1) - base)
     return sorted(zip(options, pref.tolist()), key=lambda x: -x[1])
 
 
@@ -163,6 +200,9 @@ ANSWERS = [
 ]
 
 if __name__ == "__main__":
+    if "--build" in sys.argv:
+        build_vectors()
+        sys.exit()
     places = load_places(SAMPLE_FILE)  # 예시 답변의 방문일(10/31)에 맞춘 테스트 데이터
     model = load_model()
     for ans in ANSWERS:
