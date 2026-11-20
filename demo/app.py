@@ -19,7 +19,7 @@ MOODS = ["귀여운", "조용한", "트렌디", "예술적", "레트로"]
 COMPANIONS = ["혼자", "친구", "연인", "가족"]
 BUDGETS = {"무료만": 0, "5천 원": 5000, "1만 원": 10000, "2만 원": 20000, "3만 원": 30000, "상관없음": 10**9}
 TYPE_ICON = {"팝업": "🛍️", "전시": "🖼️", "카페": "☕"}
-TYPE_COLOR = {"팝업": "#FF6B5B", "전시": "#7C5CFF", "카페": "#D68C3C"}  # 지도 핀 색
+TYPE_COLOR = {"팝업": "#FF3B30", "전시": "#AF52DE", "카페": "#FF9500"}  # 지도 핀 색
 DESC_LEN = 110  # 카드에 보일 소개글 길이
 TOP_N = 6       # 추천 개수 (2열로 3줄)
 SOON_DAYS = 7   # 끝나기 7일 전부터 '곧 끝나요', 연 지 7일 안이면 'NEW'
@@ -38,45 +38,81 @@ TASTE_ACT = {"체험": "모험가", "사진": "포토그래퍼", "굿즈": "컬�
 CSS = """
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
-html, body, [class*="st-"], button, input, textarea { font-family: Pretendard, sans-serif; }
-.block-container { padding-top: 1.6rem; padding-bottom: 2rem; max-width: 1180px; }
-header[data-testid="stHeader"] { background: transparent; }
-.hero { background: linear-gradient(120deg, #FF7A6B 0%, #FF9E7D 55%, #FFC48C 100%);
-        color: #fff; border-radius: 22px; padding: 22px 28px; margin-bottom: 18px; }
-.hero h1 { color: #fff; font-size: 2rem; font-weight: 800; margin: 0; padding: 0; }
-.hero p { margin: 4px 0 0; opacity: .95; font-size: 1rem; }
-.section { font-weight: 700; font-size: 1.1rem; margin: 2px 0 8px; }
+:root { --ink: #1D1D1F; --gray: #6E6E73; --line: #E5E5EA; --fill: #F5F5F7; --blue: #0071E3; }
+html, body, [class*="st-"], button, input, textarea {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", Pretendard, sans-serif;
+  -webkit-font-smoothing: antialiased; letter-spacing: -0.01em; }
+.block-container { padding-top: 2.4rem; padding-bottom: 3rem; max-width: 1180px; }
+header[data-testid="stHeader"] { background: rgba(245,245,247,.72); backdrop-filter: saturate(180%) blur(20px); }
+
+/* 첫 화면 큰 제목 */
+.hero { text-align: center; padding: 34px 16px 30px; }
+.hero .eyebrow { color: var(--blue); font-weight: 600; font-size: 1.05rem; margin-bottom: 6px; }
+.hero h1 { font-size: 3.4rem; font-weight: 700; letter-spacing: -0.035em; line-height: 1.08; margin: 0; padding: 0;
+           color: var(--ink); }
+.hero h1 span { background: linear-gradient(90deg, #0071E3, #7C5CFF 50%, #FF375F);
+                -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero p { color: var(--gray); font-size: 1.25rem; margin: 14px 0 0; letter-spacing: -0.015em; }
+.section { font-weight: 700; font-size: 1.35rem; letter-spacing: -0.02em; margin: 2px 0 12px; color: var(--ink); }
+.section small { color: var(--gray); font-weight: 500; font-size: .9rem; }
+
+/* 흰 카드 (질문지, 장소 카드) */
 div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {
-        background: #fff; border-radius: 18px; border: 1px solid #F6DDD3;
-        box-shadow: 0 4px 14px rgba(255, 107, 91, .08); }
-.taste { background: linear-gradient(120deg, #FFF0EA, #FFF7E6); border: 1px solid #FFD9CC; border-radius: 18px;
-         padding: 14px 20px; margin-bottom: 12px; display: flex; align-items: center; gap: 16px; }
-.taste .emoji { font-size: 44px; }
-.taste small { color: #9A6B5E; }
-.taste b { font-size: 1.25rem; color: #D2473A; }
-.thumb { width: 100%; height: 190px; object-fit: cover; border-radius: 14px; display: block; }
-.noimg { height: 190px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
-         font-size: 64px; background: linear-gradient(135deg, #FFE1D6, #FFF1D9); }
-.thumb.mini, .noimg.mini { height: 130px; font-size: 44px; }
-.mtitle { font-weight: 700; font-size: .95rem; line-height: 1.35; margin: 8px 0 6px; height: 2.7em; overflow: hidden;
-          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.title { font-size: 1.15rem; font-weight: 800; line-height: 1.35; margin: 8px 0 6px; }
-.rank { display: inline-block; background: #FF6B5B; color: #fff; border-radius: 999px;
-        width: 26px; height: 26px; line-height: 26px; text-align: center; font-size: .85rem; margin-right: 6px; }
-.chip { display: inline-block; padding: 2px 10px; margin: 0 4px 4px 0; border-radius: 999px;
-        background: #FFEDE6; color: #C8463A; font-size: .78rem; font-weight: 600; }
-.chip.soon { background: #FF4D4F; color: #fff; }
-.chip.new { background: #22B07D; color: #fff; }
-.reason { background: #FFF6F0; border-left: 4px solid #FF6B5B; border-radius: 8px;
-          padding: 7px 11px; margin: 6px 0; font-size: .9rem; }
-.desc { color: #5B5761; font-size: .88rem; line-height: 1.5; margin: 4px 0; }
-.desc a { color: #FF6B5B; font-weight: 600; text-decoration: none; }
+  background: #fff; border-radius: 22px; border: none !important;
+  box-shadow: 0 2px 12px rgba(0,0,0,.06); transition: transform .25s ease, box-shadow .25s ease; }
+div[data-testid="stVerticalBlockBorderWrapper"]:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0,0,0,.10); }
+div[data-testid="stForm"] { padding: 26px 24px; }
+
+/* 버튼: 알약 모양, 주 버튼은 애플 파랑 */
+.stButton button, .stFormSubmitButton button {
+  border-radius: 980px; border: none; background: var(--fill); color: var(--ink); font-weight: 600; transition: all .2s; }
+.stButton button:hover { background: #E8E8ED; color: var(--ink); }
+.stFormSubmitButton button, .stButton button[kind="primary"] { background: var(--blue); color: #fff; padding: 10px 0; }
+.stFormSubmitButton button:hover { background: #0077ED; color: #fff; }
+
+/* 보기 선택: 애플식 세그먼트 버튼 */
+.st-key-view div[role="radiogroup"] { background: #E8E8ED; border-radius: 980px; padding: 4px; gap: 2px;
+  display: inline-flex; flex-wrap: wrap; margin-bottom: 14px; }
+.st-key-view label { border-radius: 980px; padding: 6px 16px; margin: 0 !important; cursor: pointer; transition: all .2s; }
+.st-key-view label > div:first-child { display: none; }
+.st-key-view label:has(input:checked) { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.st-key-view label p { font-weight: 600; font-size: .92rem; }
+
+/* 나의 취향 유형: 검은 타일 */
+.taste { background: #1D1D1F; color: #F5F5F7; border-radius: 22px; padding: 22px 26px; margin-bottom: 16px;
+         display: flex; align-items: center; gap: 18px; }
+.taste .emoji { font-size: 46px; }
+.taste small { color: #A1A1A6; font-weight: 600; letter-spacing: .02em; }
+.taste b { font-size: 1.6rem; letter-spacing: -0.025em;
+           background: linear-gradient(90deg, #2997FF, #A78BFA 55%, #FF6482);
+           -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.thumb { width: 100%; height: 200px; object-fit: cover; border-radius: 16px; display: block; }
+.noimg { height: 200px; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+         font-size: 64px; background: linear-gradient(135deg, #F5F5F7, #E8E8ED); }
+.thumb.mini, .noimg.mini { height: 140px; font-size: 44px; }
+.mtitle { font-weight: 600; font-size: .98rem; line-height: 1.35; margin: 10px 0 6px; height: 2.7em; overflow: hidden;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--ink); }
+.title { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; margin: 12px 0 8px; color: var(--ink); }
+.rank { display: inline-block; background: var(--ink); color: #fff; border-radius: 999px;
+        width: 26px; height: 26px; line-height: 26px; text-align: center; font-size: .82rem; margin-right: 8px;
+        vertical-align: 2px; }
+.chip { display: inline-block; padding: 3px 10px; margin: 0 4px 4px 0; border-radius: 999px;
+        background: var(--fill); color: #424245; font-size: .78rem; font-weight: 500; }
+.chip.soon { background: #FFE5E3; color: #D70015; font-weight: 600; }
+.chip.new { background: #E3F0FF; color: var(--blue); font-weight: 600; }
+.reason { background: var(--fill); border-radius: 12px; padding: 9px 12px; margin: 8px 0; font-size: .9rem; color: var(--ink); }
+.reason small { color: var(--gray); }
+.desc { color: var(--gray); font-size: .88rem; line-height: 1.55; margin: 4px 0; }
+.desc a { color: var(--blue); font-weight: 500; text-decoration: none; }
+.desc a:hover { text-decoration: underline; }
 .step { display: flex; gap: 12px; align-items: center; }
-.step .num { background: #FF6B5B; color: #fff; border-radius: 999px; min-width: 30px; height: 30px;
-             line-height: 30px; text-align: center; font-weight: 700; }
-.move { color: #9A8F8A; font-size: .85rem; margin: 2px 0 2px 42px; }
-.empty { text-align: center; color: #9A8F8A; padding: 60px 20px; }
-.empty div { font-size: 52px; }
+.step .num { background: var(--blue); color: #fff; border-radius: 999px; min-width: 30px; height: 30px;
+             line-height: 30px; text-align: center; font-weight: 600; }
+.move { color: var(--gray); font-size: .85rem; margin: 2px 0 2px 42px; }
+.empty { text-align: center; color: var(--gray); padding: 70px 20px; font-size: 1.02rem; line-height: 1.7; }
+.empty div { font-size: 52px; margin-bottom: 8px; }
+@media (max-width: 640px) { .hero h1 { font-size: 2.3rem; } .hero p { font-size: 1.05rem; } }
 </style>
 """
 
@@ -170,7 +206,7 @@ MAP_HTML = """
   pts.forEach(p => L.marker([p.lat, p.lon], {{ icon: L.divIcon({{ className: "",
       html: `<div class="pin" style="background:${{p.color}}">${{p.label}}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }}) }})
     .addTo(map).bindPopup(`<b>${{p.label}}. ${{p.name}}</b><br>${{p.info}}`));
-  if ({path} && pts.length > 1) L.polyline(pts.map(p => [p.lat, p.lon]), {{ color: "#FF6B5B", weight: 4, opacity: .7 }}).addTo(map);
+  if ({path} && pts.length > 1) L.polyline(pts.map(p => [p.lat, p.lon]), {{ color: "#0071E3", weight: 4, opacity: .7 }}).addTo(map);
   if (pts.length > 1) map.fitBounds(pts.map(p => [p.lat, p.lon]), {{ padding: [40, 40] }});
   else map.setView([pts[0].lat, pts[0].lon], 15);
 </script>
@@ -319,7 +355,8 @@ def show_browse(places, day, ans):
 
 st.set_page_config(page_title="MoodMatch", page_icon="🎈", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
-st.markdown('<div class="hero"><h1>🎈 MoodMatch</h1>'
+st.markdown('<div class="hero"><div class="eyebrow">MoodMatch</div>'
+            '<h1>오늘 기분에 꼭 맞는 곳,<br><span>지금 바로.</span></h1>'
             '<p>취향 질문 몇 개에 답하면, 지금 갈 수 있는 서울의 팝업·전시·카페를 골라 드려요.</p></div>',
             unsafe_allow_html=True)
 

@@ -1,3 +1,6 @@
+# 배포 서버(Streamlit Community Cloud)에는 GPU가 없으니 가벼운 CPU용 torch를 받는다
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 sentence-transformers
 streamlit
 requests
