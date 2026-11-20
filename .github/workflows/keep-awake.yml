@@ -1,0 +1,32 @@
+name: Keep MoodMatch awake
+
+# Streamlit Community Cloud puts apps to sleep when nobody visits.
+# Visit the app with a real headless browser on a schedule so it stays awake.
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours (UTC)
+  workflow_dispatch:         # "Run workflow" button for a manual run
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Visit the app
+        run: python .github/scripts/wake_app.py screenshot.png
+      - name: Save screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moodmatch-screenshot
+          path: screenshot.png
+          if-no-files-found: ignore
+          retention-days: 3
