@@ -36,6 +36,7 @@ OPTION_TEXT = {
 }
 RANK_WEIGHT = [1.0, 0.7, 0.4]  # 1순위, 2순위, 3순위
 LIKE_WEIGHT = 0.7  # 좋아요한 장소와 비슷한 정도를 보기 하나만큼 반영
+DISLIKE_PENALTY = 0.3  # 별로예요한 장소와 많이 비슷하면 점수를 깎는다
 PLACES_FILE = Path(__file__).with_name("places.json")  # fetch_places.py로 받은 실제 데이터
 SAMPLE_FILE = Path(__file__).with_name("places_sample.json")  # 중간발표 때 쓴 테스트 데이터
 
@@ -74,11 +75,12 @@ def answer_weights(ans):
     return picks
 
 
-def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(), diverse=True):
+def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(), diverse=True, exclude=()):
     """1) 조건 필터(종류·날짜·지역·예산)는 코드로 거르고 2) 고른 보기와 소개글의 유사도를 가중 평균해 정렬한다.
     diverse=True면 결과에 고른 종류·여러 지역이 섞이게 고른다(diversify).
     방문일(date)을 안 주면 오늘 날짜로 본다. place_vecs는 embed_places() 결과(없으면 여기서 계산).
-    피드백: disliked(장소 id)는 빼고, liked(장소 id)와 소개글이 비슷한 곳은 점수를 더 준다."""
+    피드백: disliked(장소 id)는 빼고, liked(장소 id)와 소개글이 비슷한 곳은 점수를 더 주고,
+    disliked와 비슷한 곳은 점수를 깎는다. exclude(장소 id)는 이미 본 곳이라 후보에서 뺀다(스와이프용)."""
     day = ans.get("date") or date.today().isoformat()
     if place_vecs is None:
         place_vecs = embed_places(model, places)
@@ -87,6 +89,8 @@ def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(
         ok, why = is_open(p, day)
         if ok and p["id"] in disliked:
             ok, why = False, "별로예요 표시"
+        if ok and p["id"] in exclude:
+            ok, why = False, "이미 본 곳"
         if ok and p["type"] not in ans["types"]:
             ok, why = False, "종류 불일치"
         if ok and ans.get("regions") and p["region"] not in ans["regions"]:
@@ -104,6 +108,8 @@ def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(
     sims = util.cos_sim(opts, docs)  # [보기 수, 장소 수]
     liked_places = [(p, i) for i, p in enumerate(places) if p["id"] in liked]
     like_sims = util.cos_sim(place_vecs[[i for _, i in liked_places]], docs) if liked_places else None
+    disliked_idx = [i for i, p in enumerate(places) if p["id"] in disliked]
+    dis_sims = util.cos_sim(place_vecs[disliked_idx], docs) if disliked_idx else None
 
     ranked = []
     for j, p in enumerate(candidates):
@@ -111,10 +117,28 @@ def recommend(model, places, ans, top_n=3, place_vecs=None, liked=(), disliked=(
         per_opt += [(f"좋아요: {lp['name']}", LIKE_WEIGHT, LIKE_WEIGHT * like_sims[k][j].item())
                     for k, (lp, _) in enumerate(liked_places) if lp["id"] != p["id"]]
         score = sum(s for _, _, s in per_opt) / sum(w for _, w, _ in per_opt)
+        if dis_sims is not None:  # 별로예요한 곳 중 가장 비슷한 곳만큼 감점
+            score -= DISLIKE_PENALTY * dis_sims[:, j].max().item()
         best = max(per_opt, key=lambda x: x[2])[0]  # 추천 이유: 가장 크게 기여한 보기
         ranked.append((p, score, best))
     ranked.sort(key=lambda x: x[1], reverse=True)
     return (diversify(ranked, top_n) if diverse else ranked[:top_n]), excluded
+
+
+def taste_profile(model, places, place_vecs, liked, disliked, options):
+    """찜·별로예요 반응으로 알아낸 취향: 보기마다 (찜한 곳과의 유사도 - 전체 평균)을 계산해 높은 순으로.
+    별로예요한 곳과 비슷한 보기는 점수를 낮춘다. 찜한 곳이 없으면 빈 목록."""
+    idx = {p["id"]: i for i, p in enumerate(places)}
+    li = [idx[i] for i in liked if i in idx]
+    di = [idx[i] for i in disliked if i in idx]
+    if not li:
+        return []
+    opts = model.encode([OPTION_TEXT[o] for o in options], convert_to_tensor=True)
+    base = util.cos_sim(opts, place_vecs).mean(dim=1)  # 보기마다 모든 장소와의 평균 유사도(기준선)
+    pref = util.cos_sim(opts, place_vecs[li]).mean(dim=1) - base
+    if di:
+        pref = pref - 0.5 * (util.cos_sim(opts, place_vecs[di]).mean(dim=1) - base)
+    return sorted(zip(options, pref.tolist()), key=lambda x: -x[1])
 
 
 def diversify(ranked, top_n):

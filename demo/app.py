@@ -112,6 +112,14 @@ div[data-testid="stForm"] { padding: 26px 24px; }
 .move { color: var(--gray); font-size: .85rem; margin: 2px 0 2px 42px; }
 .empty { text-align: center; color: var(--gray); padding: 70px 20px; font-size: 1.02rem; line-height: 1.7; }
 .empty div { font-size: 52px; margin-bottom: 8px; }
+.swstat { display: flex; gap: 12px; margin-bottom: 16px; }
+.swstat div { flex: 1; background: #fff; border-radius: 16px; padding: 12px 16px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+.swstat b { font-size: 1.6rem; display: block; letter-spacing: -0.02em; }
+.swstat small { color: var(--gray); }
+.tlabel { color: var(--gray); font-size: .85rem; font-weight: 600; margin: 10px 0 6px; }
+.tbar { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: .92rem; }
+.tbar span { width: 52px; color: var(--ink); font-weight: 600; }
+.tbar i { height: 10px; border-radius: 999px; display: block; transition: width .4s; }
 @media (max-width: 640px) { .hero h1 { font-size: 2.3rem; } .hero p { font-size: 1.05rem; } }
 </style>
 """
@@ -353,6 +361,207 @@ def show_browse(places, day, ans):
         st.rerun()
 
 
+# ---------------- 스와이프로 취향 고르기 (Tinder 방식) ----------------
+SWIPE_CSS = """
+:host { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Pretendard, sans-serif; }
+.wrap { display: flex; flex-direction: column; align-items: center; user-select: none; }
+.deck { position: relative; width: 100%; max-width: 360px; height: 500px; }
+.card { position: absolute; inset: 0; background: #fff; border-radius: 26px; overflow: hidden;
+        box-shadow: 0 12px 36px rgba(0,0,0,.12); touch-action: none; cursor: grab;
+        transition: transform .3s cubic-bezier(.2,.8,.2,1), opacity .3s; }
+.card.dragging { transition: none; cursor: grabbing; }
+.card.back1 { transform: translateY(14px) scale(.95); opacity: .9; }
+.card.back2 { transform: translateY(28px) scale(.90); opacity: .6; }
+.img { height: 270px; background: linear-gradient(135deg, #F5F5F7, #E8E8ED) center/cover no-repeat;
+       display: flex; align-items: center; justify-content: center; font-size: 80px; pointer-events: none; }
+.body { padding: 16px 20px; }
+.name { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; color: #1D1D1F; line-height: 1.3;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chips { margin: 8px 0 6px; }
+.chip { display: inline-block; padding: 3px 10px; margin: 0 4px 4px 0; border-radius: 999px;
+        background: #F5F5F7; color: #424245; font-size: .76rem; font-weight: 500; }
+.chip.soon { background: #FFE5E3; color: #D70015; font-weight: 600; }
+.chip.new { background: #E3F0FF; color: #0071E3; font-weight: 600; }
+.reason { background: #F5F5F7; border-radius: 12px; padding: 8px 12px; font-size: .86rem; color: #1D1D1F; }
+.desc { color: #6E6E73; font-size: .82rem; line-height: 1.5; margin-top: 8px;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.stamp { position: absolute; top: 26px; padding: 6px 14px; border: 4px solid; border-radius: 12px;
+         font-size: 1.6rem; font-weight: 800; opacity: 0; background: rgba(255,255,255,.85); }
+.stamp.like { left: 22px; color: #34C759; transform: rotate(-14deg); }
+.stamp.nope { right: 22px; color: #FF3B30; transform: rotate(14deg); }
+.btns { display: flex; gap: 28px; margin-top: 22px; }
+.btn { width: 64px; height: 64px; border-radius: 50%; border: none; background: #fff; font-size: 28px; cursor: pointer;
+       box-shadow: 0 4px 16px rgba(0,0,0,.12); transition: transform .15s; }
+.btn:hover { transform: scale(1.08); }
+.btn:active { transform: scale(.95); }
+.btn.nope { color: #FF3B30; }
+.btn.like { color: #34C759; }
+.hint { color: #6E6E73; font-size: .8rem; margin-top: 12px; }
+.done { height: 500px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        color: #6E6E73; text-align: center; line-height: 1.7; }
+.done div { font-size: 56px; }
+"""
+
+SWIPE_JS = """
+export default function (component) {
+  const { data, setTriggerValue, parentElement } = component;
+  parentElement.querySelector('.wrap')?.remove();  // 새 카드 묶음이 오면 처음부터 다시 그린다
+  const wrap = document.createElement('div');
+  wrap.className = 'wrap';
+  parentElement.appendChild(wrap);
+  const cards = (data && data.cards) || [];
+  if (!cards.length) {
+    wrap.innerHTML = '<div class="done"><div>🎉</div><b>조건에 맞는 곳을 모두 봤어요</b>' +
+                     '찜한 곳은 ‘찜·코스’에서 하루 코스로 만들 수 있어요.</div>';
+    return;
+  }
+  // 장소 글은 textContent로만 넣는다 (HTML로 해석되지 않게)
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls;
+                                   if (text != null) e.textContent = text; return e; };
+  const deck = el('div', 'deck');
+  wrap.appendChild(deck);
+  const shown = cards.slice(0, 3);
+  for (let pos = shown.length - 1; pos >= 0; pos--) {   // 뒤 카드부터 쌓고 맨 앞(pos 0)을 마지막에
+    const c = shown[pos];
+    const card = el('div', 'card' + (pos ? ' back' + pos : ''));
+    const img = el('div', 'img');
+    if (c.image) img.style.backgroundImage = 'url("' + encodeURI(c.image) + '")'; else img.textContent = c.icon;
+    const body = el('div', 'body');
+    body.appendChild(el('div', 'name', c.name));
+    const chips = el('div', 'chips');
+    if (c.badge) chips.appendChild(el('span', 'chip ' + c.badge[1], c.badge[0]));
+    c.chips.forEach(t => chips.appendChild(el('span', 'chip', t)));
+    body.append(chips, el('div', 'reason', '💡 ' + c.reason), el('div', 'desc', c.desc));
+    card.append(img, body, el('div', 'stamp like', '찜!'), el('div', 'stamp nope', '별로'));
+    card.dataset.id = c.id;
+    deck.appendChild(card);
+  }
+  const top = deck.lastChild;
+  const like = top.querySelector('.stamp.like'), nope = top.querySelector('.stamp.nope');
+  let sent = false;
+
+  function fly(dir) {
+    if (sent) return;
+    sent = true;
+    const s = dir === 'right' ? 1 : -1;
+    top.style.transform = 'translateX(' + 600 * s + 'px) rotate(' + 30 * s + 'deg)';
+    top.style.opacity = '0';
+    (dir === 'right' ? like : nope).style.opacity = 1;
+    deck.querySelectorAll('.card.back1').forEach(c => c.classList.remove('back1'));  // 뒤 카드가 앞으로
+    setTimeout(() => setTriggerValue('swipe', { id: top.dataset.id, dir: dir, t: Date.now() }), 280);
+  }
+
+  let x0 = null, dx = 0;
+  top.addEventListener('pointerdown', e => {
+    x0 = e.clientX; dx = 0; top.classList.add('dragging'); top.setPointerCapture(e.pointerId);
+  });
+  top.addEventListener('pointermove', e => {
+    if (x0 === null) return;
+    dx = e.clientX - x0;
+    top.style.transform = 'translateX(' + dx + 'px) rotate(' + dx / 18 + 'deg)';
+    like.style.opacity = Math.max(0, Math.min(1, dx / 100));
+    nope.style.opacity = Math.max(0, Math.min(1, -dx / 100));
+  });
+  const end = () => {
+    if (x0 === null) return;
+    x0 = null;
+    top.classList.remove('dragging');
+    if (Math.abs(dx) > 110) fly(dx > 0 ? 'right' : 'left');
+    else { top.style.transform = ''; like.style.opacity = 0; nope.style.opacity = 0; }
+  };
+  top.addEventListener('pointerup', end);
+  top.addEventListener('pointercancel', end);
+
+  const btns = el('div', 'btns');
+  const bNope = el('button', 'btn nope', '✕'), bLike = el('button', 'btn like', '♥');
+  bNope.title = '별로예요 (←)';
+  bLike.title = '찜하기 (→)';
+  bNope.onclick = () => fly('left');
+  bLike.onclick = () => fly('right');
+  btns.append(bNope, bLike);
+  wrap.append(btns, el('div', 'hint', '카드를 좌우로 밀거나, 버튼 또는 키보드 ← → 를 눌러요'));
+
+  const onKey = e => {
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight') fly('right');
+    if (e.key === 'ArrowLeft') fly('left');
+  };
+  document.addEventListener('keydown', onKey);
+  return () => document.removeEventListener('keydown', onKey);
+}
+"""
+
+swipe_deck = st.components.v2.component("moodmatch_swipe", css=SWIPE_CSS, js=SWIPE_JS)
+SWIPE_STACK = 3  # 한 번에 겹쳐 보여 줄 카드 수
+
+
+def on_swipe():
+    """카드를 넘기면 (화면을 다시 그리기 전에) 찜 / 별로예요에 반영한다."""
+    ev = (st.session_state.get("swipe_deck") or {}).get("swipe")
+    if not ev or ev.get("t") == st.session_state.get("swipe_last_t"):
+        return
+    st.session_state.swipe_last_t = ev.get("t")
+    fb = st.session_state.feedback
+    if ev["dir"] == "right":
+        fb["liked"].add(ev["id"])
+    else:
+        fb["disliked"].add(ev["id"])
+        fb["liked"].discard(ev["id"])
+    st.session_state.setdefault("swipe_log", []).append((ev["id"], ev["dir"]))
+
+
+def swipe_card_data(p, best, day):
+    price = "가격 미확인" if p["price"] is None else ("무료" if p["price"] == 0 else f"{p['price']:,}원")
+    desc = p["desc"] if len(p["desc"]) <= DESC_LEN else p["desc"][:DESC_LEN] + "…"
+    return {"id": p["id"], "name": p["name"], "image": p.get("image") or "", "icon": TYPE_ICON.get(p["type"], "🎈"),
+            "chips": [f"{TYPE_ICON.get(p['type'], '')} {p['type']}", f"📍 {p['region']}", f"💳 {price}",
+                      f"📅 {period_text(p)}"],
+            "badge": badge(p, day), "reason": reason_text(best), "desc": desc}
+
+
+def taste_bars(items, color):
+    top = max(abs(v) for _, v in items) or 1
+    return "".join(f'<div class="tbar"><span>{escape(o)}</span><i style="width:{max(6, abs(v) / top * 100):.0f}%;'
+                   f'background:{color}"></i></div>' for o, v in items)
+
+
+def show_swipe(model, places, place_vecs, ans, day):
+    fb = st.session_state.feedback
+    log = st.session_state.setdefault("swipe_log", [])
+    deck, _ = rec.recommend(model, places, ans, top_n=SWIPE_STACK, place_vecs=place_vecs, liked=fb["liked"],
+                            disliked=fb["disliked"], exclude=fb["liked"] | fb["disliked"], diverse=False)
+    c1, c2 = st.columns([1.2, 1], gap="large")
+    with c1:
+        swipe_deck(data={"cards": [swipe_card_data(p, best, day) for p, _, best in deck]},
+                   key="swipe_deck", on_swipe_change=on_swipe)
+    with c2:
+        n_like = sum(d == "right" for _, d in log)
+        st.markdown(f'<div class="section">취향 학습 중</div>'
+                    f'<div class="swstat"><div><b style="color:#34C759">♥ {n_like}</b><small>찜</small></div>'
+                    f'<div><b style="color:#FF3B30">✕ {len(log) - n_like}</b><small>별로</small></div></div>',
+                    unsafe_allow_html=True)
+        prof = rec.taste_profile(model, places, place_vecs, fb["liked"], fb["disliked"], ACTIVITIES + MOODS)
+        if not prof:
+            st.markdown('<div class="desc">마음에 드는 카드를 <b>오른쪽</b>으로 넘겨 보세요. '
+                        '넘길수록 다음 카드가 내 취향에 맞게 바뀌어요.</div>', unsafe_allow_html=True)
+        else:
+            like_side = [x for x in prof[:3] if x[1] > 0]
+            dis_side = [x for x in prof[-2:] if x[1] < 0] if fb["disliked"] else []
+            html = ""
+            if like_side:
+                html += '<div class="tlabel">반응으로 알아낸 취향</div>' + taste_bars(like_side, "#0071E3")
+            if dis_side:
+                html += '<div class="tlabel">덜 끌리는 것</div>' + taste_bars(dis_side[::-1], "#C7C7CC")
+            st.markdown(html, unsafe_allow_html=True)
+            st.caption("찜한 곳과 비슷한 곳은 점수를 올리고, 별로예요와 비슷한 곳은 내려서 다음 카드를 골라요. "
+                       "‘🎯 추천 결과’도 다음 추천받기 때 이 반응을 반영해요.")
+        if log and st.button("↩︎ 방금 넘긴 카드 되돌리기", use_container_width=True):
+            pid, d = log.pop()
+            (fb["liked"] if d == "right" else fb["disliked"]).discard(pid)
+            st.rerun()
+
+
 st.set_page_config(page_title="MoodMatch", page_icon="🎈", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
 st.markdown('<div class="hero"><div class="eyebrow">MoodMatch</div>'
@@ -402,14 +611,15 @@ with right:
                                liked=st.session_state.get("liked_at_submit", set()), disliked=fb["disliked"])
         taste_card(ans)
     # 탭은 숨은 탭의 지도가 빈 화면으로 그려질 때가 있어서, 고른 화면 하나만 그리는 선택 버튼을 쓴다
-    views = ["🎯 추천 결과", "🗺️ 지도로 보기", "📋 전체 둘러보기", f"❤️ 찜·코스 ({len(fb['liked'])})"]
-    view = st.radio("보기", range(4), format_func=lambda i: views[i], horizontal=True,
+    views = {"rec": "🎯 추천 결과", "swipe": "💫 스와이프", "map": "🗺️ 지도로 보기", "browse": "📋 전체 둘러보기",
+             "course": f"❤️ 찜·코스 ({len(fb['liked'])})"}
+    view = st.radio("보기", list(views), format_func=views.get, horizontal=True,
                     label_visibility="collapsed", key="view")
-    if view in (0, 1) and not ans:
+    if view in ("rec", "swipe", "map") and not ans:
         st.markdown(f'<div class="empty"><div>🔍</div>왼쪽 질문지에 답하고 <b>추천받기</b>를 눌러 보세요.<br>'
                     f'지금 열려 있는 {len(places)}곳 중에서 골라 드려요. '
                     f'먼저 구경하고 싶으면 <b>📋 전체 둘러보기</b>를 눌러 보세요.</div>', unsafe_allow_html=True)
-    elif view == 0:
+    elif view == "rec":
         st.caption("🤍 찜한 곳은 ‘찜·코스’에 모이고, 다음에 추천받기를 누르면 비슷한 곳을 더 찾아 줘요. "
                    "👎 별로예요는 바로 빼고 다른 곳으로 채워요.")
         if not top:
@@ -418,9 +628,11 @@ with right:
         for i, (p, score, best) in enumerate(top, 1):
             with cols[(i - 1) % 2]:
                 show_card(i, p, score, best, visit)
-    elif view == 1:
+    elif view == "swipe":
+        show_swipe(model, places, place_vecs, ans, visit)
+    elif view == "map":
         show_map([p for p, _, _ in top])
-    elif view == 2:
+    elif view == "browse":
         show_browse(places, visit, ans)
     else:
         show_course(places, visit)
